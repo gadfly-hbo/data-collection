@@ -1,8 +1,14 @@
-# 采集来源白名单（对应 SQLite sources 表；schema_type 对应 models/ 下注册的 Pydantic Schema 类名）
+# 采集来源白名单（对应 SQLite sources 表；schema_type 对应 models/registry.py 注册的类名）
 sources:
   - name: HackerNews
     url: https://news.ycombinator.com
-    schema_type: NewsItem      # models/registry.py 中注册的类名
+    schema_type: NewsItem      # 聚合列表页：按设计记 SKIPPED_NO_CONTENT，0 次 LLM 调用
     interval_s: 3600
     enabled: true
-    instruction: ""            # 可选：附加给 LLM 的提取指令
+    instruction: ""
+  - name: Wikipedia-WebScraping
+    url: https://en.wikipedia.org/wiki/Web_scraping
+    schema_type: NewsItem
+    interval_s: 7200
+    enabled: true
+    instruction: ""
