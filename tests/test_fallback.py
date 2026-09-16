@@ -15,6 +15,11 @@ from storage.raw_store import RawStore
 
 ARTICLE_HTML = (pathlib.Path(__file__).parent / "fixtures" / "article.html").read_text()
 
+class _NoSleep:
+    async def __call__(self, seconds: float) -> None:
+        pass
+
+
 
 class _FakeProvider:
     def __init__(self, name: str, results: list):
@@ -42,7 +47,8 @@ async def test_primary_exhausts_then_fallback_completes():
     primary = _FakeProvider("primary-fake", [TransientProviderError("429")])
     fallback = _FakeProvider("fallback-fake", [_result("fallback-fake")])
     stack = FallbackProvider(primary, fallback, max_retries=2,
-                             on_degrade=lambda a, b: degraded.append((a, b)))
+                             on_degrade=lambda a, b: degraded.append((a, b)),
+                             sleep=_NoSleep())
 
     result = await stack.extract("正文", NewsItem)
 
@@ -55,7 +61,7 @@ async def test_primary_exhausts_then_fallback_completes():
 async def test_both_exhaust_raise_transient():
     primary = _FakeProvider("p", [TransientProviderError("429")])
     fallback = _FakeProvider("f", [TransientProviderError("503")])
-    stack = FallbackProvider(primary, fallback, max_retries=1)
+    stack = FallbackProvider(primary, fallback, max_retries=1, sleep=_NoSleep())
 
     with pytest.raises(TransientProviderError):
         await stack.extract("x", NewsItem)
@@ -64,7 +70,7 @@ async def test_both_exhaust_raise_transient():
 
 async def test_no_fallback_propagates_after_exhaustion():
     primary = _FakeProvider("p", [TransientProviderError("429")])
-    stack = FallbackProvider(primary, None, max_retries=1)
+    stack = FallbackProvider(primary, None, max_retries=1, sleep=_NoSleep())
 
     with pytest.raises(TransientProviderError):
         await stack.extract("x", NewsItem)
@@ -76,7 +82,7 @@ async def test_degrade_visible_in_ledger(tmp_path):
     db = Database(":memory:")
     primary = _FakeProvider("primary-fake", [TransientProviderError("429 quota")])
     fallback = _FakeProvider("fallback-fake", [_result("fallback-fake")])
-    stack = FallbackProvider(primary, fallback, max_retries=1)
+    stack = FallbackProvider(primary, fallback, max_retries=1, sleep=_NoSleep())
 
     async def handle(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("/robots.txt"):

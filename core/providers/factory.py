@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from core.providers.anthropic_compat import AnthropicCompatProvider
 from core.providers.base import ExtractionResult, LLMProvider, TransientProviderError
@@ -42,18 +42,25 @@ class FallbackProvider:
 
     def __init__(self, primary: LLMProvider, fallback: LLMProvider | None = None,
                  *, max_retries: int = 5,
-                 on_degrade: Callable[[str, str], None] | None = None):
+                 on_degrade: Callable[[str, str], None] | None = None,
+                 sleep: Callable[[float], Awaitable] | None = None):
         self.primary = primary
         self.fallback = fallback
         self.max_retries = max_retries
         self._on_degrade = on_degrade
+        self._sleep = sleep
         self.name = primary.name if fallback is None else f"{primary.name}|{fallback.name}"
+
+    def _retry(self, call):
+        kwargs = {"max_retries": self.max_retries}
+        if self._sleep is not None:
+            kwargs["sleep"] = self._sleep
+        return with_backoff(call, **kwargs)
 
     async def extract(self, content: str, schema, *, instruction: str = ""):
         try:
-            return await with_backoff(
-                lambda: self.primary.extract(content, schema, instruction=instruction),
-                max_retries=self.max_retries)
+            return await self._retry(
+                lambda: self.primary.extract(content, schema, instruction=instruction))
         except TransientProviderError as e:
             if self.fallback is None:
                 raise
@@ -61,9 +68,8 @@ class FallbackProvider:
                            self.primary.name, e, self.fallback.name)
             if self._on_degrade is not None:
                 self._on_degrade(self.primary.name, self.fallback.name)
-            return await with_backoff(
-                lambda: self.fallback.extract(content, schema, instruction=instruction),
-                max_retries=self.max_retries)
+            return await self._retry(
+                lambda: self.fallback.extract(content, schema, instruction=instruction))
 
 
 def create_provider_stack(provider_cfg: dict) -> LLMProvider:
