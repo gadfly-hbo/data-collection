@@ -12,9 +12,9 @@
 - **内容**：创建 `requirements.txt`（httpx、trafilatura、pydantic>=2.0、apscheduler、google-genai、openai、pytest、pytest-asyncio）；按 PLAN.md §6 建目录骨架（`core/`、`core/providers/`、`models/`、`storage/`、`scripts/`、`tests/`）；`config/settings.yaml` 与 `config/sources.yaml` 骨架（含 PLAN.md §5.1 的示例配置）；`.env.example`；pytest 配置（注册 `live` marker，默认忽略）。
 - **依赖**：无。
 - **验收**：
-  - [ ] `pip install -r requirements.txt` 全量安装无错误
-  - [ ] `pytest` 空跑通过（0 失败）
-  - [ ] `pytest -m live` 提示无匹配用例而非报错
+  - [x] `pip install -r requirements.txt` 全量安装无错误（Python 3.14.4，见下方提交记录中的版本清单）
+  - [x] `pytest` 空跑通过（0 失败，3 项脚手架自检通过）
+  - [x] `pytest -m live` 提示无匹配用例而非报错（marker 已注册，3 deselected）
 
 ### T1.2 数据模型层
 - **内容**：`models/base_schema.py`（公共字段 `source_url`、`scraped_at`）；`models/news_schema.py`、`models/competitor_schema.py` 两个业务 Schema。

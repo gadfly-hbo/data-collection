@@ -1,0 +1,8 @@
+# 采集来源白名单（对应 SQLite sources 表；schema_type 对应 models/ 下注册的 Pydantic Schema 类名）
+sources:
+  - name: HackerNews
+    url: https://news.ycombinator.com
+    schema_type: NewsItem      # models/news_schema.py 中定义（T1.2 落地）
+    interval_s: 3600
+    enabled: true
+    instruction: ""            # 可选：附加给 LLM 的提取指令

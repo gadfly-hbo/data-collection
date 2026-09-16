@@ -1,0 +1,23 @@
+# 全局运行配置（骨架值来自 PLAN.md §5.1；budget 参数待 T3.3 按实测基线校准）
+
+provider:
+  primary: gemini              # 主供应商
+  fallback: openai-compat      # 主供应商退避穷尽后自动切换
+  gemini:
+    # 模型名以官方文档当前稳定版为准
+    model: gemini-flash-latest
+  openai-compat:
+    model: deepseek-chat       # 亦可为 OpenRouter 免费模型或本地 Ollama 模型
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+
+# 日预算熔断（任务数 / Token 数双上限，超限当日停止派发新任务）
+budget:
+  max_tasks_per_day: 300
+  max_input_tokens_per_day: 2000000
+
+fetch:
+  min_interval_per_host_s: 5   # 同一域名两次请求的最小间隔
+  respect_robots: true
+  # 上线前改为真实联系方式
+  user_agent: "DataCollectorBot/0.1 (personal research; contact: you@example.com)"
