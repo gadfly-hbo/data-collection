@@ -191,6 +191,38 @@
 
 ---
 
+## 代码审核修正（2026-09-17）
+
+> 子 agent 整体审核（P0×0 / P1×2 / P2×5 / P3×17）后的集中修正。修正后基线：**pytest 151 passed，core+storage 覆盖率 93%**，守护进程已切换到修正后代码。
+
+### P1（已修复，均有回归测试）
+- [x] **P1-1 异常路径绕过台账**：`Pipeline.run` 将一切异常兑换为 `FETCH_ERROR` 终态（错误类型随 error_msg 留痕）照常入台账；`Fetcher.fetch` 对非法 URL（`http://`、坏 IPv6 等，抛 ValueError/InvalidURL 而非 HTTPError）返回 FETCH_ERROR 维持契约
+- [x] **P1-2 304 短路永久吞掉失败任务**：pipeline 在 FETCH_ERROR / SCHEMA_ERROR 终态后调用 `fetcher.discard_validators(url)`，失败内容下次全量重抓重试；成功任务的 304 短路行为保持不变
+
+### P2（已修复）
+- [x] **P2-1** 无 schema_version 行的遗留库打开时按缺列检测补迁移（此前静默跳过、写入即崩）
+- [x] **P2-2** 迁移语句与版本戳放进同一 `BEGIN IMMEDIATE` 事务，中断不留半迁移状态
+- [x] **P2-3** 校验失败抛 `UsageReportedError`（携带真实用量），SCHEMA_ERROR 的 input/output tokens 入台账与预算口径
+- [x] **P2-4** openai-compat strict schema 补 `additionalProperties:false` 与全量 required（官方端点不再 400）
+- [x] **P2-5** 去重键加入 schema_type（JOIN extracted_items）：同 URL 改配 Schema 后按新 Schema 重新提取
+
+### P3（已修复 9 项）
+- [x] WAL 日志模式（面板/导出 ro 读与采集写并发；已实测干净关闭后 ro 打开正常）
+- [x] crawl_runs/extracted_items 增查询索引
+- [x] 二次 Ctrl-C 强制退出（os._exit 130）
+- [x] daemon 配置错误与 `get_schema` 异常隔离（不再裸抛/不中断本轮剩余来源）
+- [x] run_once budget 配置缺失报可读错误（退出码 2）
+- [x] tick 的 last_run 改记派发时刻（消除慢任务漂移），预算熔断跳过也推进（防日志刷屏）
+- [x] 快照 tmp + `os.replace` 原子写盘
+- [x] 成功率口径与 `RunOutcome.ok` 对齐（SKIP_* 计为成功）
+- [x] BILLABLE_STATUSES 常量归位 core/status.py（budget/queries 共用）；export csv/json 分支合并；空 YAML 导入防御
+
+### 未采纳 / 待办
+- **WAL 之外的 P3 未修项**（已评估，按现设计接受）：fallback 通道独立 rpm、robots 抓取限速、`_pace` 在途串行、事件循环内同步阻塞（单 Worker 设计内可接受）、瞬态判定子串收紧、core↔storage 分层方向（`core/status.py` 已自述动机）——扩展多 Worker 或多通道时再评估
+- **T4.2 live 冒烟**：仍待 gemini / openai-compat Key（MiniMax Token Plan 配额耗尽中，待周期刷新）
+
+---
+
 ## 参数记录区（任务执行中回填）
 
 | 指标 | 实测值 | 记录任务 |
