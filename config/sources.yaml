@@ -2,7 +2,7 @@
 sources:
   - name: HackerNews
     url: https://news.ycombinator.com
-    schema_type: NewsItem      # models/news_schema.py 中定义（T1.2 落地）
+    schema_type: NewsItem      # models/registry.py 中注册的类名
     interval_s: 3600
     enabled: true
     instruction: ""            # 可选：附加给 LLM 的提取指令

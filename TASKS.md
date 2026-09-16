@@ -20,8 +20,9 @@
 - **内容**：`models/base_schema.py`（公共字段 `source_url`、`scraped_at`）；`models/news_schema.py`、`models/competitor_schema.py` 两个业务 Schema。
 - **依赖**：T1.1。
 - **验收**：
-  - [ ] 三个模型的 `model_json_schema()` 均可序列化为合法 JSON Schema（单测断言关键字段存在）
-  - [ ] 字段带中文 `description`（作为 Structured Output 的语义提示）
+  - [x] 三个模型的 `model_json_schema()` 均可序列化为合法 JSON Schema（单测断言关键字段存在）
+  - [x] 字段带中文 `description`（作为 Structured Output 的语义提示，单测逐字段断言含中文）
+- **补充交付**：`models/registry.py`（schema_type 字符串 → 模型类注册表，供 T1.6 解析 sources.yaml 使用）
 
 ### T1.3 抓取器 Fetcher
 - **内容**：`core/fetcher.py`——`httpx.AsyncClient`（UA、30s 超时、跟随重定向）；robots.txt 检查（按域名缓存，拒绝 → `BLOCKED`）；同域名最小间隔限速；条件请求（`ETag`/`Last-Modified` → 304 短路）；状态分类 `OK / BLOCKED / FETCH_ERROR`。
