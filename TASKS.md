@@ -28,8 +28,8 @@
 - **内容**：`core/fetcher.py`——`httpx.AsyncClient`（UA、30s 超时、跟随重定向）；robots.txt 检查（按域名缓存，拒绝 → `BLOCKED`）；同域名最小间隔限速；条件请求（`ETag`/`Last-Modified` → 304 短路）；状态分类 `OK / BLOCKED / FETCH_ERROR`。
 - **依赖**：T1.1。
 - **验收**：
-  - [ ] 单测：robots 允许/拒绝/不可达三分支；限速间隔生效（mock 时钟断言两次请求间隔 ≥ 配置值）；403/429 归为 `BLOCKED`、超时与 5xx 归为 `FETCH_ERROR`
-  - [ ] live 冒烟：对 `https://news.ycombinator.com` 返回 `OK` 且带 HTML
+  - [x] 单测：robots 允许/拒绝/不可达三分支（另覆盖 5xx 视为全站禁止）；限速间隔生效（注入 `_sleep` 断言同域第二次请求等待 ≥ 配置值）；403/429/401 归为 `BLOCKED`、超时与 5xx/404 归为 `FETCH_ERROR`；304 短路、重定向跟随
+  - [x] live 冒烟：对 `https://news.ycombinator.com` 返回 `OK` 且带 HTML
 
 ### T1.4 正文抽取 Parser
 - **内容**：`core/parser.py`——`trafilatura.extract(output_format="markdown")` 封装；无正文的列表页/空页返回 `None`（对应 `SKIPPED_NO_CONTENT`）。
