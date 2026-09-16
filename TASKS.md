@@ -41,9 +41,9 @@
 - **内容**：`core/providers/base.py`（`LLMProvider` 协议 + `ExtractionResult`：item、input/output_tokens、provider、model）；`core/providers/gemini.py`（原生 `response_schema` 接受 Pydantic 模型；初始化校验 `GEMINI_API_KEY`；HTTP 429/5xx 归一化为 `TransientProviderError`）。
 - **依赖**：T1.1、T1.2。
 - **验收**：
-  - [ ] 单测（mock SDK）：schema 约束被传入、token 用量被提取、429 归一化异常
-  - [ ] live 冒烟：对样例正文 + `news_schema` 返回通过 Pydantic 校验的对象
-  - [ ] **记录实测单任务 Token 消耗基线**（写入本文件 Phase 3 参数区）
+  - [x] 单测（mock SDK）：schema 约束被传入、token 用量被提取、429/5xx 归一化异常；另覆盖鉴权错误不误判瞬态、空响应、非法 JSON 抛 ValidationError、缺 Key 拒绝初始化
+  - [ ] live 冒烟：对样例正文 + `news_schema` 返回通过 Pydantic 校验的对象（**待 `GEMINI_API_KEY`**——live 用例已就绪，`pytest -m live` 有 Key 即跑）
+  - [ ] **记录实测单任务 Token 消耗基线**（写入本文件 Phase 3 参数区，同上待 Key）
 
 ### T1.6 流水线主干与 run_once
 - **内容**：`core/pipeline.py`（fetch → parse → extract → 校验 → 输出；`validate_or_retry_once` 失败后全新调用一次，instruction 附失败原因；快照/去重/台账此阶段先留桩接口）；`scripts/run_once.py`（`--url` 与 `--schema` 参数）。
