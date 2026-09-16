@@ -160,6 +160,30 @@
 
 ---
 
+## Phase 5：Web 管理界面（可选增强，Phase 4 后按需启动）
+
+> 定位：PLAN.md §10 原列为本期范围外的 Web UI，已拆解排期。实现前提：T2.4（有台账数据可看）、T3.4（配置管理需守护进程配合）。UI 依赖独立放 `requirements-ui.txt`，不污染无界面部署；AGENTS.md 硬性规则继续适用——面板对 SQLite 只读（T5.1），配置写路径收敛在来源表（T5.2），不引入并发写台账。
+
+### T5.1 只读监控面板
+- **内容**：`scripts/dashboard.py`（Streamlit，SQLite **read-only 连接** `file:...?mode=ro`）三块视图——状态监控（`crawl_runs` 成功率 / 状态分布 / Token 消耗按天趋势 / blocked 来源清单）、数据查询（`extracted_items` 按 schema_type / 日期 / 关键词过滤，详情 JSON 展开）、来源总览（`sources` 与各自最近一次运行状态）；新增 `requirements-ui.txt`（streamlit）。
+- **依赖**：T2.4。
+- **验收**：
+  - [ ] `streamlit run scripts/dashboard.py` 三块视图可用
+  - [ ] 只读保证：ro 模式连接 + 代码无任何写路径；daemon 运行中并发读不干扰采集
+  - [ ] 查询带日期 / 条数上限分页，万级台账不卡死
+
+### T5.2 来源配置管理
+- **内容**：来源白名单从 sources.yaml 迁移为 `sources` 表（单一事实源）：一次性幂等迁移命令 `scripts/import_sources.py`（UNIQUE url 冲突则更新）；面板支持来源新增 / 编辑 / 启停 / 删除（schema_type 下拉限定 registry 注册项、interval_s 校验下限）；`run_daemon` 改为每轮从 `sources` 表读取任务清单。
+- **依赖**：T5.1、T3.4。
+- **验收**：
+  - [ ] 面板新增 / 禁用来源后，daemon 下一轮按新配置执行（被禁用来源不再调度）
+  - [ ] sources.yaml → sources 表迁移可重复执行（幂等）
+  - [ ] 非法输入被拒：未知 schema_type、interval_s 低于抓取下限、URL 非法
+
+**阶段闸门 5**：daemon 运行 24 小时期间面板持续可用（并发只读不影响采集）；所有配置变更在下一轮调度中生效，且可从台账追溯到对应执行记录。
+
+---
+
 ## 参数记录区（任务执行中回填）
 
 | 指标 | 实测值 | 记录任务 |
