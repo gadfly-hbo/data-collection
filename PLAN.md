@@ -124,7 +124,7 @@ YAML 配置采集目标
 | :--- | :--- | :--- | :--- |
 | **HTTP 抓取** | 静态页面拉取 | `httpx` | 异步、HTTP/2、精细超时控制、连接复用 |
 | **正文抽取** | HTML → 干净 Markdown | `trafilatura` | 成熟的去噪/正文识别能力，直接输出 Markdown |
-| **LLM 接入** | 语义理解与字段提炼 | Provider 抽象 + `google-genai` / `openai` SDK | 供应商可配置可替换，凭据走环境变量 |
+| **LLM 接入** | 语义理解与字段提炼 | Provider 抽象 + `google-genai` / `openai` / `anthropic` SDK | 供应商可配置可替换，凭据走环境变量 |
 | **结构化输出** | 输出格式硬约束 | 嫁接在各 Provider 的**原生 Structured Output** 上 | Gemini `response_schema` / OpenAI `json_schema` 模式 |
 | **数据建模与校验** | 目标字段定义 | `Pydantic v2` | 同一份模型类既生成 API 约束又做落库前校验 |
 | **任务调度** | 定时 / 周期执行 | `APScheduler 3.x` | `cron` 与 `interval` 两种策略 |
@@ -220,6 +220,8 @@ class OpenAICompatProvider:
         )
         ...
 ```
+
+**Anthropic 协议兼容实现（`core/providers/anthropic_compat.py`）**：覆盖 Anthropic 官方 API 与 MiniMax 等 Anthropic 协议端点（如 `https://api.minimax.cn/anthropic` + `MiniMax-M3`）。Messages API 无服务端 json_schema，Schema 以 Prompt 注入 + Pydantic 强校验兜底；思考型模型的思考内容不在 text 块中，仅拼接 text 块。
 
 **配置示例（`config/settings.yaml`）**：
 

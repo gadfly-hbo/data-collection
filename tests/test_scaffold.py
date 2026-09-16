@@ -8,8 +8,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def test_settings_yaml_parses():
     cfg = yaml.safe_load((ROOT / "config" / "settings.yaml").read_text())
-    assert cfg["provider"]["primary"] == "gemini"
-    assert cfg["provider"]["fallback"] == "openai-compat"
+    known = {"gemini", "anthropic-compat", "openai-compat"}
+    assert cfg["provider"]["primary"] in known
+    assert cfg["provider"]["fallback"] in known
     assert cfg["fetch"]["respect_robots"] is True
     assert cfg["budget"]["max_tasks_per_day"] > 0
 

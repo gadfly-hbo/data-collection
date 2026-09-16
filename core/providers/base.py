@@ -14,6 +14,28 @@ class TransientProviderError(Exception):
     """供应商侧可重试的瞬态错误（429 / 5xx / 网络抖动），由退避层处理。"""
 
 
+# 小写匹配；命中即视为可退避重试的瞬态错误
+_TRANSIENT_MARKERS = (
+    "429", "resource_exhausted", "rate limit", "rate_limit", "quota",
+    "500", "502", "503", "504", "internal error", "unavailable", "deadline exceeded",
+)
+
+
+def normalize_provider_error(err: Exception) -> Exception:
+    """按 HTTP 状态码属性与错误文案，把 429 / 5xx 归一化为 TransientProviderError。
+
+    其余错误（鉴权、参数、配额外原因等）原样返回，由调用方决定是否继续抛出。
+    兼容各 SDK 的状态码属性名（anthropic/openai 用 status_code，google 用 code）。
+    """
+    for attr in ("status_code", "code"):
+        status = getattr(err, attr, None)
+        if isinstance(status, int) and (status == 429 or status >= 500):
+            return TransientProviderError(str(err))
+    if any(marker in str(err).lower() for marker in _TRANSIENT_MARKERS):
+        return TransientProviderError(str(err))
+    return err
+
+
 @dataclass
 class ExtractionResult(Generic[T]):
     """单次语义提取的产出：强类型对象 + Token 用量（台账与预算熔断依赖）。"""

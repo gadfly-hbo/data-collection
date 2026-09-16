@@ -1,12 +1,17 @@
 # 全局运行配置（骨架值来自 PLAN.md §5.1；budget 参数待 T3.3 按实测基线校准）
 
 provider:
-  primary: gemini              # 主供应商
-  fallback: openai-compat      # 主供应商退避穷尽后自动切换
+  primary: gemini              # 主供应商（配置了对应 Key 的即可用）
+  fallback: anthropic-compat   # 主供应商退避穷尽后自动切换
   gemini:
     # 模型名以官方文档当前稳定版为准
     model: gemini-flash-latest
-  openai-compat:
+  anthropic-compat:            # Anthropic 协议兼容端点：MiniMax / Anthropic 官方等
+    model: MiniMax-M3
+    base_url: https://api.minimax.cn/anthropic
+    api_key_env: MINIMAX_API_KEY
+    max_tokens: 16384          # M3 为思考型模型，输出含思考 token，需留余量
+  openai-compat:               # OpenAI 协议端点（Phase 4 / T4.2 实现）
     model: deepseek-chat       # 亦可为 OpenRouter 免费模型或本地 Ollama 模型
     base_url: https://api.deepseek.com/v1
     api_key_env: DEEPSEEK_API_KEY

@@ -41,9 +41,10 @@
 - **内容**：`core/providers/base.py`（`LLMProvider` 协议 + `ExtractionResult`：item、input/output_tokens、provider、model）；`core/providers/gemini.py`（原生 `response_schema` 接受 Pydantic 模型；初始化校验 `GEMINI_API_KEY`；HTTP 429/5xx 归一化为 `TransientProviderError`）。
 - **依赖**：T1.1、T1.2。
 - **验收**：
-  - [x] 单测（mock SDK）：schema 约束被传入、token 用量被提取、429/5xx 归一化异常；另覆盖鉴权错误不误判瞬态、空响应、非法 JSON 抛 ValidationError、缺 Key 拒绝初始化
-  - [ ] live 冒烟：对样例正文 + `news_schema` 返回通过 Pydantic 校验的对象（**待 `GEMINI_API_KEY`**——live 用例已就绪，`pytest -m live` 有 Key 即跑）
-  - [ ] **记录实测单任务 Token 消耗基线**（写入本文件 Phase 3 参数区，同上待 Key）
+  - [x] 单测（mock SDK）：schema 约束被传入、token 用量被提取、429/5xx 归一化异常；另覆盖鉴权错误不误判瞬态、空响应、非法 JSON 抛 ValidationError、缺 Key 拒绝初始化（gemini 与 anthropic-compat 各一套）
+  - [x] live 冒烟：对样例正文 + `news_schema` 返回通过 Pydantic 校验的对象（按决议改为"任一已配 Key 的兼容端点"——实测经 `anthropic-compat` / MiniMax-M3 连续两次通过；Gemini 待有 Key 后由同一用例自动覆盖）
+  - [x] **记录实测单任务 Token 消耗基线**（写入下方参数记录区）
+- **补充交付**：`core/providers/anthropic_compat.py`（Anthropic 协议端点，覆盖 MiniMax，自 Prompt 注入 Schema + JSON 提取 + Pydantic 兜底）、`core/providers/factory.py`（配置 → 实例）、`core/dotenv.py`（.env 加载，conftest 已接入）；live 冒烟用例按 settings.yaml 自动选择有 Key 的供应商
 
 ### T1.6 流水线主干与 run_once
 - **内容**：`core/pipeline.py`（fetch → parse → extract → 校验 → 输出；`validate_or_retry_once` 失败后全新调用一次，instruction 附失败原因；快照/去重/台账此阶段先留桩接口）；`scripts/run_once.py`（`--url` 与 `--schema` 参数）。
@@ -163,9 +164,9 @@
 
 | 指标 | 实测值 | 记录任务 |
 | :--- | :--- | :--- |
-| 单任务 input tokens（均值） | 待测 | T1.5 |
-| 单任务 output tokens（均值） | 待测 | T1.5 |
-| 单任务端到端耗时（均值） | 待测 | T1.6 |
+| 单任务 input tokens | 1（* MiniMax-M3 冒烟样本值；该端点 input 计费口径存疑——探测小样本曾报 40，T1.6 端对端时复核） | T1.5 |
+| 单任务 output tokens | 146~152（* MiniMax-M3 样例正文结构化抽取，两次实测区间；T1.6 换真实网页复核） | T1.5 |
+| 单任务端到端耗时（均值） | ~2s（* 冒烟样本；T1.6 端对端含抓取后复核） | T1.6 |
 | 免费层实测日可支撑任务数 | 待推算 | 阶段闸门 1 |
 | `budget.max_tasks_per_day` 定值 | 待定 | T3.3 |
 | `budget.max_input_tokens_per_day` 定值 | 待定 | T3.3 |

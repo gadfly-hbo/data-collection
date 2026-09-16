@@ -8,25 +8,9 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from core.providers.base import ExtractionResult, TransientProviderError
+from core.providers.base import ExtractionResult, TransientProviderError, normalize_provider_error
 
 T = TypeVar("T", bound=BaseModel)
-
-# 小写匹配；命中即视为可退避重试的瞬态错误
-_TRANSIENT_MARKERS = (
-    "429", "resource_exhausted", "rate limit", "quota",
-    "500", "502", "503", "504", "internal error", "unavailable", "deadline exceeded",
-)
-
-
-def _as_transient(err: Exception) -> Exception:
-    """把 429 / 5xx 归一化为 TransientProviderError；鉴权、参数等错误原样返回。"""
-    status = getattr(err, "code", None)
-    if isinstance(status, int) and (status == 429 or status >= 500):
-        return TransientProviderError(str(err))
-    if any(marker in str(err).lower() for marker in _TRANSIENT_MARKERS):
-        return TransientProviderError(str(err))
-    return err
 
 
 class GeminiProvider:
@@ -57,7 +41,7 @@ class GeminiProvider:
         except TransientProviderError:
             raise
         except Exception as e:
-            raise _as_transient(e) from e
+            raise normalize_provider_error(e) from e
 
         if not resp.text:
             candidates = getattr(resp, "candidates", None)

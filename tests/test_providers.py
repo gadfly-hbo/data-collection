@@ -1,13 +1,18 @@
-"""T1.5：LLMProvider 协议与 GeminiProvider 验收测试（mock SDK，不打真实 API）。"""
+"""T1.5：LLMProvider 协议与 Provider 实现验收测试（mock，不打真实 API）。"""
 import json
 import os
+import pathlib
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from core.providers.base import ExtractionResult, TransientProviderError
+from core.providers.factory import create_provider
 from core.providers.gemini import GeminiProvider
 from models.news_schema import NewsItem
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 # ---------- 测试替身：模拟 google-genai 客户端 ----------
@@ -121,13 +126,32 @@ def test_missing_api_key_rejected(monkeypatch):
         GeminiProvider()
 
 
-# ---------- live 冒烟（需 GEMINI_API_KEY，默认跳过） ----------
+# ---------- live 冒烟：按 settings.yaml 与可用 Key 自动选供应商（默认跳过） ----------
+
+_ENV_BY_PROVIDER = {
+    "gemini": "GEMINI_API_KEY",
+    "anthropic-compat": "ANTHROPIC_API_KEY",
+    "openai-compat": "OPENAI_API_KEY",
+}
+
+
+def _pick_live_provider():
+    provider_cfg = yaml.safe_load(
+        (ROOT / "config" / "settings.yaml").read_text())["provider"]
+    for name in (provider_cfg.get("primary"), provider_cfg.get("fallback")):
+        opts = provider_cfg.get(name) or {}
+        key_env = opts.get("api_key_env", _ENV_BY_PROVIDER.get(name, ""))
+        if key_env and os.environ.get(key_env):
+            try:
+                return create_provider(name, opts)
+            except RuntimeError:
+                continue
+    pytest.skip("无可用供应商 Key（GEMINI_API_KEY / MINIMAX_API_KEY 等）")
+
 
 @pytest.mark.live
-@pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"),
-                    reason="需要 GEMINI_API_KEY")
-async def test_gemini_live_smoke():
-    provider = GeminiProvider()
+async def test_live_smoke_any_provider():
+    provider = _pick_live_provider()
     sample = (
         "2026 年 9 月 15 日，Acme 公司宣布正式推出新一代数据平台 Horizon，"
         "并同步完成 2 亿美元 C 轮融资。公司称本季度营收同比增长 45%，"
@@ -138,3 +162,5 @@ async def test_gemini_live_smoke():
     assert result.item.title
     assert result.item.sentiment in ("positive", "neutral", "negative")
     assert result.input_tokens > 0
+    print(f"\n[live] provider={result.provider} model={result.model} "
+          f"tokens: {result.input_tokens} in / {result.output_tokens} out")

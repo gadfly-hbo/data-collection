@@ -8,6 +8,7 @@ APScheduler>=3.10,<4.0
 # 仅 core/providers/ 内允许 import
 google-genai>=1.0
 openai>=1.40
+anthropic>=0.40
 
 # 测试
 pytest>=8.0
