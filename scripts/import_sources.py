@@ -23,7 +23,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def import_yaml_sources(db: Database, yaml_path: pathlib.Path) -> int:
-    data = yaml.safe_load(pathlib.Path(yaml_path).read_text())
+    data = yaml.safe_load(pathlib.Path(yaml_path).read_text()) or {}
     count = 0
     for src in data.get("sources", []):
         db.upsert_source(

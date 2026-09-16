@@ -1,4 +1,6 @@
-"""T2.2：SQLite 三表验收测试（内存 / 临时文件 SQLite）。"""
+"""T2.2 + P2：SQLite 三表验收测试（内存 / 临时文件 SQLite）。"""
+import sqlite3
+
 import pytest
 
 from storage.db import SCHEMA_VERSION, Database
@@ -80,6 +82,35 @@ def test_future_schema_version_rejected(tmp_path):
 
 
 # ---------- T5.2：来源配置校验 / 删除 / v1→v2 迁移 ----------
+
+def test_wal_mode_enabled(tmp_path):
+    db = Database(tmp_path / "wal.db")   # 内存库 journal_mode 固定为 memory，须用文件库验证
+    assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    db.close()
+
+
+def test_legacy_db_without_version_row_migrates(tmp_path):
+    """P2-1：无 schema_version 行的遗留库打开时必须补迁移而非静默跳过。"""
+    path = tmp_path / "orphan.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+    CREATE TABLE sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE,
+        name TEXT, schema_type TEXT NOT NULL, interval_s INTEGER DEFAULT 3600,
+        enabled INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));
+    INSERT INTO sources (url, schema_type, name)
+        VALUES ('https://old.example', 'NewsItem', '无版本行遗留');
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)  # 修复前：静默跳过迁移，随后写入报 no column named use_browser
+    assert db.conn.execute(
+        "SELECT MAX(version) AS v FROM schema_version").fetchone()["v"] == SCHEMA_VERSION
+    row = db.get_source("https://old.example")
+    assert row["use_browser"] == 0 and row["instruction"] == ""
+    db.upsert_source("https://old.example", schema_type="NewsItem", name="迁移后可写")
+    db.close()
 
 def test_validate_source_rejects_bad_input():
     db = Database(":memory:")

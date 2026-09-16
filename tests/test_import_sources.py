@@ -25,6 +25,13 @@ def _write(tmp_path, text):
     return p
 
 
+def test_import_empty_yaml_is_noop(tmp_path):
+    db = Database(":memory:")
+    p = tmp_path / "empty.yaml"
+    p.write_text("", encoding="utf-8")
+    assert import_yaml_sources(db, p) == 0  # safe_load 返回 None 时不得 AttributeError
+
+
 def test_import_is_idempotent(tmp_path):
     db = Database(":memory:")
     yaml_path = _write(tmp_path, YAML_V1)

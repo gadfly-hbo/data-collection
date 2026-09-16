@@ -56,13 +56,16 @@ async def _run(args: argparse.Namespace) -> int:
 
     budget_cfg = settings.get("budget") or {}
     if budget_cfg:
-        budget = BudgetGuard(db,
-                             max_tasks_per_day=budget_cfg["max_tasks_per_day"],
-                             max_input_tokens_per_day=budget_cfg["max_input_tokens_per_day"])
         try:
+            budget = BudgetGuard(db,
+                                 max_tasks_per_day=budget_cfg["max_tasks_per_day"],
+                                 max_input_tokens_per_day=budget_cfg["max_input_tokens_per_day"])
             budget.check()
         except BudgetExhausted as e:
             _emit({"error": str(e)})
+            return 2
+        except KeyError as e:
+            _emit({"error": f"budget 配置不完整，缺少 {e}"})
             return 2
 
     async with Fetcher(

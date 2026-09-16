@@ -211,6 +211,18 @@ async def test_js_site_renders_via_browser_live():
         "静态路径的正文应显著少于渲染后（JS 渲染站点）"
 
 
+@pytest.mark.parametrize("bad_url", ["http://", "not-a-url", "https://[::1"])
+async def test_invalid_url_is_fetch_error(bad_url):
+    """P1-1：非法 URL 返回 FETCH_ERROR 契约（此前抛 ValueError/InvalidURL 绕过台账）。"""
+    async def handle(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("非法 URL 不应发出任何请求")
+
+    async with Fetcher(UA, transport=httpx.MockTransport(handle)) as f:
+        result = await f.fetch(bad_url)
+    assert result.status is FetchStatus.FETCH_ERROR
+    assert result.reason and "URL" in result.reason
+
+
 @pytest.mark.live
 async def test_fetch_hn_live():
     async with Fetcher(

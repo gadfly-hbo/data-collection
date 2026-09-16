@@ -91,6 +91,15 @@ class Fetcher:
         await self._client.aclose()
 
     async def fetch(self, url: str, *, use_browser: bool = False) -> FetchResult:
+        try:
+            host = httpx.URL(url).host
+        except (httpx.InvalidURL, ValueError) as e:
+            return FetchResult(status=FetchStatus.FETCH_ERROR, url=url,
+                               reason=f"非法 URL: {e}")
+        if not host:
+            return FetchResult(status=FetchStatus.FETCH_ERROR, url=url,
+                               reason="非法 URL: 缺少 host")
+
         if self._respect_robots:
             try:
                 robots = await self._robots_for(url)
@@ -101,7 +110,7 @@ class Fetcher:
                 return FetchResult(status=FetchStatus.BLOCKED, url=url,
                                    reason="robots.txt disallow")
 
-        await self._pace(httpx.URL(url).host)
+        await self._pace(host)
 
         if use_browser:  # JS 渲染站点：robots 与限速已前置执行
             return await self._fetch_with_browser(url)
@@ -165,7 +174,7 @@ class Fetcher:
         return parser
 
     async def _pace(self, host: str) -> None:
-        """同域名串行且保持最小间隔，避免触发目标站风控。"""
+        """同域名请求保持最小间隔（在途串行由单 Worker 结构保证）。"""
         lock = self._host_locks.setdefault(host, asyncio.Lock())
         async with lock:
             last = self._last_hit.get(host)
@@ -174,6 +183,11 @@ class Fetcher:
                 if remaining > 0:
                     await self._sleep(remaining)
             self._last_hit[host] = time.monotonic()
+
+    def discard_validators(self, url: str) -> None:
+        """任务失败后丢弃条件请求验证器（P1-2）：下次对该 URL 全量重抓，
+        防止 304 短路把失败内容的重试永久标记为 UNCHANGED。"""
+        self._validators.pop(url, None)
 
     async def _sleep(self, seconds: float) -> None:
         await asyncio.sleep(seconds)
@@ -191,9 +205,21 @@ class Fetcher:
     async def _ensure_page(self):
         if self._page is None:
             async_playwright = self._load_playwright()
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            self._page = await self._browser.new_page(user_agent=self._ua)
+            playwright = await async_playwright().start()
+            try:
+                self._browser = await playwright.chromium.launch(headless=True)
+                self._page = await self._browser.new_page(user_agent=self._ua)
+            except Exception:
+                # 启动失败回滚已启动的资源，避免残留实例泄漏
+                try:
+                    if self._browser is not None:
+                        await self._browser.close()
+                    await playwright.stop()
+                except Exception:
+                    pass
+                self._browser = None
+                self._playwright = None
+                raise
         return self._page
 
     async def _fetch_with_browser(self, url: str) -> FetchResult:

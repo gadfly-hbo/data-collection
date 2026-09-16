@@ -105,6 +105,18 @@ async def test_run_source_passes_source_id_and_browser_flag(caplog):
     assert any("run_id=42" in r.message for r in caplog.records)
 
 
+async def test_invalid_schema_type_isolated(caplog):
+    """P3：sources 表被写入非法 schema_type 时，单来源报错不中断本轮其余来源。"""
+    pipeline = _FakePipeline(outcomes=[])
+    caplog.set_level(logging.ERROR, logger="daemon")
+    await rd.run_source({"id": 1, "url": "https://c.example/1",
+                         "schema_type": "Nope", "interval_s": 60, "enabled": 1,
+                         "use_browser": 0, "instruction": ""},
+                        _ctx(pipeline))
+    assert pipeline.calls == []
+    assert any("Nope" in r.message for r in caplog.records)
+
+
 async def test_worker_lock_serializes_concurrent_sources():
     events: list[str] = []
 

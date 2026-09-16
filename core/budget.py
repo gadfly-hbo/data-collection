@@ -9,9 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 
+from core.status import BILLABLE_STATUSES
 from storage.db import Database
-
-_BILLABLE_STATUSES = ("SUCCESS", "SCHEMA_ERROR")
 
 
 class BudgetExhausted(RuntimeError):
@@ -29,12 +28,12 @@ class BudgetGuard:
             lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d"))
 
     def usage(self) -> tuple[int, int]:
-        placeholders = ",".join("?" * len(_BILLABLE_STATUSES))
+        placeholders = ",".join("?" * len(BILLABLE_STATUSES))
         row = self._db.conn.execute(
             f"SELECT COUNT(*) AS tasks, COALESCE(SUM(input_tokens), 0) AS tokens "
             f"FROM crawl_runs WHERE status IN ({placeholders}) "
             f"AND substr(created_at, 1, 10) = ?",
-            (*_BILLABLE_STATUSES, self._today()),
+            (*BILLABLE_STATUSES, self._today()),
         ).fetchone()
         return row["tasks"], row["tokens"]
 

@@ -4,10 +4,15 @@ import pathlib
 import httpx
 import pytest
 
+from core.dedup import DedupGate
 from core.fetcher import Fetcher
 from core.pipeline import Pipeline, RunStatus, TaskSpec
-from core.providers.base import ExtractionResult, TransientProviderError
+from core.providers.base import (ExtractionResult, TransientProviderError,
+                                 UsageReportedError)
 from models.news_schema import NewsItem
+from storage.db import Database
+from storage.ledger import RunLedger
+from storage.raw_store import RawStore
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ARTICLE_HTML = (REPO_ROOT / "tests" / "fixtures" / "article.html").read_text()
@@ -135,12 +140,70 @@ async def test_not_modified_maps_to_skipped_unchanged():
     assert len(provider.calls) == 1  # 内容未变：0 次重复 LLM 调用
 
 
-async def test_transient_provider_error_propagates():
-    provider = FakeProvider([TransientProviderError("429 quota exceeded")])
+async def test_provider_exception_becomes_fetch_error_with_ledger(tmp_path):
+    """P1-1：供应商异常不得绕过台账——pipeline 兑换为 FETCH_ERROR 终态并记录。"""
+    provider = FakeProvider([TransientProviderError("429 quota")])
+    db = Database(":memory:")
     async with _fetcher_for_page() as f:
-        with pytest.raises(TransientProviderError):
-            await Pipeline(f, provider).run(
-                TaskSpec(url="https://a.example/1", schema=NewsItem))
+        outcome = await Pipeline(f, provider, ledger=RunLedger(db)).run(
+            TaskSpec(url="https://a.example/1", schema=NewsItem))
+
+    assert outcome.status is RunStatus.FETCH_ERROR
+    assert "TransientProviderError" in outcome.error
+    row = db.conn.execute("SELECT * FROM crawl_runs").fetchone()
+    assert row["status"] == "FETCH_ERROR"
+    assert "TransientProviderError" in row["error_msg"]
+
+
+async def test_schema_error_carries_accumulated_token_usage(tmp_path):
+    """P2-3：校验失败的实际 Token 消耗须随 SCHEMA_ERROR 入台账（预算口径）。"""
+    provider = FakeProvider([UsageReportedError("bad", 50, 5),
+                             UsageReportedError("still bad", 30, 4)])
+    db = Database(":memory:")
+    async with _fetcher_for_page() as f:
+        outcome = await Pipeline(f, provider, raw_store=RawStore(tmp_path / "raw"),
+                                 ledger=RunLedger(db)).run(
+            TaskSpec(url="https://a.example/1", schema=NewsItem))
+
+    assert outcome.status is RunStatus.SCHEMA_ERROR
+    assert (outcome.input_tokens, outcome.output_tokens) == (80, 9)  # 两次累计
+    row = db.conn.execute("SELECT * FROM crawl_runs").fetchone()
+    assert row["input_tokens"] == 80
+
+
+async def test_failed_task_not_pinned_by_304(tmp_path):
+    """P1-2：提取失败后内容未变 → 下次必须全量重抓重试，不得被 304 短路。"""
+    requests = {"page": 0}
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("/robots.txt"):
+            return httpx.Response(404)
+        requests["page"] += 1
+        if request.headers.get("if-none-match") == '"v1"':
+            return httpx.Response(304)
+        return httpx.Response(200, text=ARTICLE_HTML, headers={"ETag": '"v1"'})
+
+    db = Database(":memory:")
+    fetcher = Fetcher("TestBot/1.0", min_interval_per_host_s=0,
+                      transport=httpx.MockTransport(handle))
+    task = TaskSpec(url="https://a.example/story", schema=NewsItem)
+    async with fetcher:
+        bad = Pipeline(fetcher, FakeProvider([ValueError("bad json")]),
+                       raw_store=RawStore(tmp_path / "raw"),
+                       dedup=DedupGate(db), ledger=RunLedger(db))
+        assert (await bad.run(task)).status is RunStatus.SCHEMA_ERROR
+        assert requests["page"] == 1
+
+        good = Pipeline(fetcher, FakeProvider([_result()]),
+                        raw_store=RawStore(tmp_path / "raw"),
+                        dedup=DedupGate(db), ledger=RunLedger(db))
+        outcome = await good.run(task)
+        assert outcome.status is RunStatus.SUCCESS   # 失败后全量重抓重试
+        assert requests["page"] == 2                 # 未被 304 短路
+
+        again = await good.run(task)
+        assert again.status is RunStatus.SKIPPED_UNCHANGED  # 成功后 304 短路恢复
+        assert requests["page"] == 3
 
 
 # ---------- T2.3：快照 + 去重闸门集成 ----------
@@ -155,11 +218,6 @@ def _wired_pipeline(provider, tmp_path, html_by_call: list[str]):
         html = html_by_call[min(served["i"], len(html_by_call) - 1)]
         served["i"] += 1
         return httpx.Response(200, text=html)
-
-    from core.dedup import DedupGate
-    from storage.db import Database
-    from storage.ledger import RunLedger
-    from storage.raw_store import RawStore
 
     fetcher = Fetcher("TestBot/1.0", min_interval_per_host_s=0,
                       transport=httpx.MockTransport(handle))

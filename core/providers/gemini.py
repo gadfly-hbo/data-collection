@@ -6,9 +6,10 @@ from typing import TypeVar
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from core.providers.base import ExtractionResult, TransientProviderError, normalize_provider_error
+from core.providers.base import (ExtractionResult, TransientProviderError,
+                                 UsageReportedError, normalize_provider_error)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -48,10 +49,19 @@ class GeminiProvider:
             finish = getattr(candidates[0], "finish_reason", None) if candidates else None
             raise RuntimeError(f"Gemini 返回空响应（finish_reason={finish}）")
         usage = resp.usage_metadata
+        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        try:
+            item = schema.model_validate_json(resp.text)
+        except ValidationError as e:
+            # 校验失败但调用已发生：用量必须带回台账（预算口径）
+            raise UsageReportedError(
+                f"响应不是合法的 {schema.__name__}，原始内容片段：{resp.text[:200]}",
+                input_tokens, output_tokens) from e
         return ExtractionResult(
-            item=schema.model_validate_json(resp.text),
-            input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-            output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+            item=item,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             provider=self.name,
             model=self.model,
         )

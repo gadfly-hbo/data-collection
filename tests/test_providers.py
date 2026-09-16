@@ -5,9 +5,9 @@ import pathlib
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
-from core.providers.base import ExtractionResult, TransientProviderError
+from core.providers.base import (ExtractionResult, TransientProviderError,
+                                 UsageReportedError)
 from core.providers.factory import create_provider
 from core.providers.gemini import GeminiProvider
 from models.news_schema import NewsItem
@@ -108,10 +108,12 @@ async def test_auth_error_not_transient():
     assert not isinstance(exc_info.value, TransientProviderError)
 
 
-async def test_invalid_json_raises_validation_error():
-    p = _provider(resp=_FakeResp(json.dumps({"title": "只有标题"})))
-    with pytest.raises(ValidationError):
+async def test_invalid_json_carries_usage(tmp_path=None):
+    """P2-3：校验失败时 Token 用量随 UsageReportedError 带回（预算口径）。"""
+    p = _provider(resp=_FakeResp('{"title": "只有标题"}', usage=_FakeUsage(33, 7)))
+    with pytest.raises(UsageReportedError) as exc_info:
         await p.extract("x", NewsItem)
+    assert (exc_info.value.input_tokens, exc_info.value.output_tokens) == (33, 7)
 
 
 async def test_empty_response_raises():

@@ -14,6 +14,19 @@ class TransientProviderError(Exception):
     """供应商侧可重试的瞬态错误（429 / 5xx / 网络抖动），由退避层处理。"""
 
 
+class UsageReportedError(ValueError):
+    """携带实际 Token 用量的非瞬态错误（如输出未通过校验）。
+
+    校验失败时响应已消耗完整调用的 Token，异常必须把用量带回 pipeline
+    记入台账，否则失败风暴下预算熔断的 token 口径失真。
+    """
+
+    def __init__(self, message: str, input_tokens: int = 0, output_tokens: int = 0):
+        super().__init__(message)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
 # 小写匹配；命中即视为可退避重试的瞬态错误
 _TRANSIENT_MARKERS = (
     "429", "resource_exhausted", "rate limit", "rate_limit", "quota",

@@ -119,12 +119,8 @@ def main() -> int:
 
     output = {"csv": to_csv, "json": to_json, "markdown": to_markdown}[args.format](rows)
     if args.out:
-        out = pathlib.Path(args.out)
-        if args.format == "csv":
-            out.write_text(output, encoding="utf-8")  # 已含 BOM 字符
-        else:
-            out.write_text(output, encoding="utf-8")
-        print(f"已导出 {len(rows)} 条 → {out}", file=sys.stderr)
+        pathlib.Path(args.out).write_text(output, encoding="utf-8")
+        print(f"已导出 {len(rows)} 条 → {args.out}", file=sys.stderr)
     else:
         sys.stdout.write(output)
     return 0

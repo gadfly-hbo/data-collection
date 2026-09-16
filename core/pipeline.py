@@ -17,6 +17,7 @@ from core.fetcher import FetchStatus, Fetcher
 from core.parser import extract_markdown
 from core.providers.base import LLMProvider
 from core.status import RunStatus  # noqa: F401  再导出，兼容既有导入路径
+from core.providers.base import UsageReportedError
 from storage.ledger import RunLedger
 from storage.raw_store import RawStore
 
@@ -83,8 +84,18 @@ class Pipeline:
 
     async def run(self, task: TaskSpec) -> RunOutcome:
         start = time.monotonic()
-        outcome = await self._run(task)
+        try:
+            outcome = await self._run(task)
+        except Exception as e:
+            # 硬性规则：任何任务的终态都必须入台账。异常（退避穷尽、空响应、
+            # 编程错误等）统一兑换为 FETCH_ERROR 终态，错误类型随 error_msg 留痕
+            outcome = RunOutcome(RunStatus.FETCH_ERROR, task.url,
+                                 error=f"{type(e).__name__}: {_brief(e)}")
         outcome.duration_ms = int((time.monotonic() - start) * 1000)
+        if outcome.status in (RunStatus.FETCH_ERROR, RunStatus.SCHEMA_ERROR):
+            # 失败任务丢弃条件请求验证器：下次全量重抓重试，
+            # 防止 304 短路把失败内容永久标记为 UNCHANGED
+            self.fetcher.discard_validators(task.url)
         if self.ledger is not None:
             outcome.run_id = self.ledger.record(outcome,
                                                 schema_type=task.schema.__name__,
@@ -109,17 +120,23 @@ class Pipeline:
         raw_hash: str | None = None
         if self.raw_store is not None:
             raw_hash = self.raw_store.save(markdown)
-            if self.dedup is not None and self.dedup.seen(task.url, raw_hash):
+            if self.dedup is not None and self.dedup.seen(
+                    task.url, raw_hash, task.schema.__name__):
                 return RunOutcome(RunStatus.SKIPPED_UNCHANGED, task.url,
                                   raw_hash=raw_hash)
 
         try:
             result = await self._extract_with_retry(markdown, task.schema,
                                                     task.instruction)
+        except UsageReportedError as e:
+            # 各次尝试的真实 Token 用量随异常带回，SCHEMA_ERROR 也入预算口径
+            return RunOutcome(RunStatus.SCHEMA_ERROR, task.url, raw_hash=raw_hash,
+                              input_tokens=e.input_tokens,
+                              output_tokens=e.output_tokens, error=str(e))
         except (ValidationError, ValueError) as e:
-            return RunOutcome(RunStatus.SCHEMA_ERROR, task.url,
+            return RunOutcome(RunStatus.SCHEMA_ERROR, task.url, raw_hash=raw_hash,
                               error=f"两次提取均未通过校验: {_brief(e)}")
-        # TransientProviderError 等供应商级异常向上抛出：T3.1/T3.2 接管退避与降级
+        # TransientProviderError 等供应商级异常由 run() 兑换为终态（T3.1/T3.2 已重试）
 
         item = _stamp(result.item, fetched.url)
         return RunOutcome(
@@ -130,17 +147,24 @@ class Pipeline:
 
     async def _extract_with_retry(self, content: str, schema: type[BaseModel],
                                   instruction: str):
-        """提取 + 校验；失败后全新调用一次（附失败原因），两次均失败抛最后异常。"""
+        """提取 + 校验；失败后全新调用一次（附失败原因），两次均失败抛
+        UsageReportedError（含各次尝试累计的真实 Token 用量）。"""
         last_error: Exception | None = None
+        input_tokens = output_tokens = 0
         for attempt in range(2):
             instr = instruction
             if attempt > 0 and last_error is not None:
                 instr = instruction + _RETRY_HINT.format(reason=_brief(last_error))
             try:
                 return await self.provider.extract(content, schema, instruction=instr)
+            except UsageReportedError as e:
+                input_tokens += e.input_tokens
+                output_tokens += e.output_tokens
+                last_error = e
             except (ValidationError, ValueError) as e:
                 last_error = e
-        raise last_error  # pragma: no cover - 循环必然赋值
+        raise UsageReportedError(
+            f"两次提取均未通过校验: {_brief(last_error)}", input_tokens, output_tokens)
 
 
 def _stamp(item: BaseModel, source_url: str) -> BaseModel:

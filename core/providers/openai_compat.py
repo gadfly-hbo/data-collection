@@ -15,12 +15,31 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from core.providers.base import (ExtractionResult, TransientProviderError,
-                                 normalize_provider_error)
+                                 UsageReportedError, normalize_provider_error)
 from core.providers.json_text import extract_json_object, strip_code_fence
 
 T = TypeVar("T", bound=BaseModel)
 
 _DEFAULT_SYSTEM = "你是信息提取助手。只输出一个符合要求的 JSON 对象，禁止解释文字。"
+
+
+def _strictify(schema: dict) -> dict:
+    """OpenAI strict 模式硬性要求：每层对象 additionalProperties:false 且
+    所有属性入 required（LLM 必须给出全部字段，含可选字段——缺失即 400）。
+    直接就地修整 model_json_schema() 的输出并返回。"""
+    def fix(node):
+        if isinstance(node, dict):
+            if "properties" in node:
+                node["additionalProperties"] = False
+                node["required"] = list(node["properties"].keys())
+            for value in node.values():
+                fix(value)
+        elif isinstance(node, list):
+            for value in node:
+                fix(value)
+        return node
+
+    return fix(schema)
 
 
 class OpenAICompatProvider:
@@ -44,7 +63,7 @@ class OpenAICompatProvider:
         if self.response_format == "json_schema":
             return {"type": "json_schema",
                     "json_schema": {"name": schema.__name__,
-                                    "schema": schema.model_json_schema(),
+                                    "schema": _strictify(schema.model_json_schema()),
                                     "strict": True}}
         if self.response_format == "json_object":
             return {"type": "json_object"}
@@ -72,12 +91,15 @@ class OpenAICompatProvider:
         text = (resp.choices[0].message.content or "").strip()
         if not text:
             raise RuntimeError("供应商返回空响应")
+        usage = resp.usage
         try:
             item = schema.model_validate_json(extract_json_object(strip_code_fence(text)))
         except ValueError as e:
-            raise ValueError(
-                f"响应不是合法的 {schema.__name__}，原始内容片段：{text[:200]}") from e
-        usage = resp.usage
+            # 校验失败但调用已发生：用量必须带回台账（预算口径）
+            raise UsageReportedError(
+                f"响应不是合法的 {schema.__name__}，原始内容片段：{text[:200]}",
+                getattr(usage, "prompt_tokens", 0) or 0,
+                getattr(usage, "completion_tokens", 0) or 0) from e
         return ExtractionResult(
             item=item,
             input_tokens=getattr(usage, "prompt_tokens", 0) or 0,

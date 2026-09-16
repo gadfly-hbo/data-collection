@@ -85,6 +85,16 @@ async def test_extract_sends_schema_and_parses():
     assert "提取资讯" in system and '"topics"' in system
 
 
+async def test_strict_schema_satisfies_openai_requirements():
+    """P2-4：strict 模式的 schema 必须满足 OpenAI 硬性要求——
+    additionalProperties:false 且所有属性入 required，否则官方端点直接 400。"""
+    p = _provider(resp=_FakeResp(NEWS_JSON))
+    await p.extract("x", NewsItem)
+    js = p.client.chat.completions.calls[0]["response_format"]["json_schema"]["schema"]
+    assert js["additionalProperties"] is False
+    assert sorted(js["required"]) == sorted(js["properties"].keys())
+
+
 async def test_response_format_none_omits_param():
     p = _provider(resp=_FakeResp(NEWS_JSON), response_format="none")
     await p.extract("x", NewsItem)

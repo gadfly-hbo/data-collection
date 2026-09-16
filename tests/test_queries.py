@@ -49,7 +49,8 @@ def test_status_summary(tmp_path):
     assert s["total"] == 5
     assert s["by_status"] == {"SUCCESS": 2, "SCHEMA_ERROR": 1,
                               "BLOCKED": 1, "SKIPPED_UNCHANGED": 1}
-    assert s["success_rate"] == pytest.approx(2 / 5)
+    # 口径与 RunOutcome.ok 一致：SKIP_* 属按设计跳过，计为成功（P3-16）
+    assert s["success_rate"] == pytest.approx(3 / 5)
     assert s["today_tasks"] == 3           # 2 SUCCESS + 1 SCHEMA_ERROR
     assert s["today_input_tokens"] == 115  # 100 + 10 + 5
 

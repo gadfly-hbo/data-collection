@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER NOT NULL,
     applied_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_runs_dedup ON crawl_runs (url, raw_hash, status);
+CREATE INDEX IF NOT EXISTS idx_runs_created ON crawl_runs (created_at);
+CREATE INDEX IF NOT EXISTS idx_items_run ON extracted_items (run_id);
+CREATE INDEX IF NOT EXISTS idx_items_schema ON extracted_items (schema_type);
 """
 
 # 已发布版本的增量迁移：key = 迁移到的版本号
@@ -85,11 +90,31 @@ class Database:
         self._conn = sqlite3.connect(path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._conn.execute("PRAGMA journal_mode = WAL")  # 面板只读连接与采集写并发
         self._init_schema()
 
     @property
     def conn(self) -> sqlite3.Connection:
         return self._conn
+
+    def _columns(self, table: str) -> set[str]:
+        return {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+
+    def _apply_migration(self, version: int) -> None:
+        """单个版本的迁移语句与版本戳放进同一事务（SQLite 支持事务性 DDL），
+        进程在迁移中途崩溃不会留下半迁移状态。"""
+        if self._conn.in_transaction:
+            self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in _MIGRATIONS[version]:
+                self._conn.execute(statement)
+            self._conn.execute("INSERT INTO schema_version (version) VALUES (?)",
+                               (version,))
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def _init_schema(self) -> None:
         """幂等建库 + 按版本增量迁移；重复初始化不报错、不丢数据。"""
@@ -97,19 +122,20 @@ class Database:
         row = self._conn.execute(
             "SELECT MAX(version) AS v FROM schema_version").fetchone()
         if row["v"] is None:
+            # 无版本行：全新库直接登记当前版本；遗留库（缺新列）先补齐迁移
+            if "use_browser" not in self._columns("sources"):
+                self._apply_migration(2)
             self._conn.execute("INSERT INTO schema_version (version) VALUES (?)",
                                (SCHEMA_VERSION,))
-        elif row["v"] > SCHEMA_VERSION:
+            self._conn.commit()
+            return
+        if row["v"] > SCHEMA_VERSION:
             raise RuntimeError(
                 f"数据库 schema 版本 {row['v']} 高于代码支持的 {SCHEMA_VERSION}，请升级程序")
-        else:
-            version = row["v"]
-            while version < SCHEMA_VERSION:
-                version += 1
-                for statement in _MIGRATIONS[version]:
-                    self._conn.execute(statement)
-                self._conn.execute(
-                    "INSERT INTO schema_version (version) VALUES (?)", (version,))
+        version = row["v"]
+        while version < SCHEMA_VERSION:
+            version += 1
+            self._apply_migration(version)
         self._conn.commit()
 
     def close(self) -> None:

@@ -12,7 +12,8 @@ from typing import TypeVar
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
-from core.providers.base import ExtractionResult, TransientProviderError, normalize_provider_error
+from core.providers.base import (ExtractionResult, TransientProviderError,
+                                 UsageReportedError, normalize_provider_error)
 from core.providers.json_text import extract_json_object, strip_code_fence
 
 T = TypeVar("T", bound=BaseModel)
@@ -68,9 +69,10 @@ class AnthropicCompatProvider:
         try:
             item = schema.model_validate_json(extract_json_object(strip_code_fence(text)))
         except ValueError as e:
-            raise ValueError(
-                f"响应不是合法的 {schema.__name__}，原始内容片段：{text[:200]}"
-            ) from e
+            # 校验失败但调用已发生：用量必须带回台账（预算口径）
+            raise UsageReportedError(
+                f"响应不是合法的 {schema.__name__}，原始内容片段：{text[:200]}",
+                resp.usage.input_tokens or 0, resp.usage.output_tokens or 0) from e
         return ExtractionResult(
             item=item,
             input_tokens=resp.usage.input_tokens or 0,

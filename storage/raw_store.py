@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 
@@ -17,11 +18,14 @@ class RawStore:
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def save(self, content: str) -> str:
-        """写入快照并返回内容哈希；幂等——重复保存不产生第二个文件。"""
+        """写入快照并返回内容哈希；tmp + os.replace 原子落盘，
+        进程中断不会留下同名截断文件破坏 exists() 幂等语义。"""
         digest = self.content_hash(content)
         path = self.path(digest)
         if not path.exists():
-            path.write_text(content, encoding="utf-8")
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, path)
         return digest
 
     def path(self, content_hash: str) -> Path:

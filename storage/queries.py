@@ -5,7 +5,7 @@ import json
 import pathlib
 import sqlite3
 
-_BILLABLE = ("SUCCESS", "SCHEMA_ERROR")
+from core.status import BILLABLE_STATUSES
 
 
 def connect_ro(db_path: str | pathlib.Path) -> sqlite3.Connection:
@@ -22,27 +22,30 @@ def status_summary(conn: sqlite3.Connection) -> dict:
     total = conn.execute("SELECT COUNT(*) AS n FROM crawl_runs").fetchone()["n"]
     by_status = {r["status"]: r["n"] for r in conn.execute(
         "SELECT status, COUNT(*) AS n FROM crawl_runs GROUP BY status")}
-    placeholders = ",".join("?" * len(_BILLABLE))
+    placeholders = ",".join("?" * len(BILLABLE_STATUSES))
     today = conn.execute(
         f"SELECT COUNT(*) AS tasks, COALESCE(SUM(input_tokens), 0) AS tokens "
         f"FROM crawl_runs WHERE status IN ({placeholders}) "
         f"AND substr(created_at, 1, 10) = date('now')",
-        _BILLABLE).fetchone()
+        BILLABLE_STATUSES).fetchone()
+    # 成功率口径与 RunOutcome.ok 一致：SKIP_* 属按设计跳过，计为成功
+    ok = sum(by_status.get(s, 0) for s in
+             ("SUCCESS", "SKIPPED_UNCHANGED", "SKIPPED_NO_CONTENT"))
     return {"total": total, "by_status": by_status,
-            "success_rate": (by_status.get("SUCCESS", 0) / total) if total else 0.0,
+            "success_rate": (ok / total) if total else 0.0,
             "today_tasks": today["tasks"],
             "today_input_tokens": today["tokens"]}
 
 
 def daily_tokens(conn: sqlite3.Connection, days: int = 30) -> list[sqlite3.Row]:
-    placeholders = ",".join("?" * len(_BILLABLE))
+    placeholders = ",".join("?" * len(BILLABLE_STATUSES))
     return conn.execute(
         f"SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS tasks, "
         f"COALESCE(SUM(input_tokens), 0) AS input_tokens, "
         f"COALESCE(SUM(output_tokens), 0) AS output_tokens "
         f"FROM crawl_runs WHERE status IN ({placeholders}) "
         f"GROUP BY day ORDER BY day DESC LIMIT ?",
-        (*_BILLABLE, days)).fetchall()
+        (*BILLABLE_STATUSES, days)).fetchall()
 
 
 def blocked_sources(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:

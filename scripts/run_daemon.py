@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import pathlib
 import signal
 import subprocess
@@ -86,14 +87,14 @@ async def run_source(source, ctx: DaemonContext) -> None:
             except BudgetExhausted as e:
                 logger.warning("预算熔断，跳过本次调度 %s：%s", url, e)
                 return
-        spec = TaskSpec(url=url,
-                        schema=get_schema(source["schema_type"]),
-                        instruction=source["instruction"] or "",
-                        source_id=source["id"],
-                        use_browser=bool(source["use_browser"]))
         try:
+            spec = TaskSpec(url=url,
+                            schema=get_schema(source["schema_type"]),
+                            instruction=source["instruction"] or "",
+                            source_id=source["id"],
+                            use_browser=bool(source["use_browser"]))
             outcome = await ctx.pipeline.run(spec)
-        except Exception as e:  # 认证失败等供应商级异常：告警并继续调度
+        except Exception as e:  # 非法配置、认证失败等：告警并继续本轮剩余来源
             logger.error("任务异常 %s：%s: %s", url, type(e).__name__, e)
             notify("采集任务异常", f"{url}\n{type(e).__name__}: {e}",
                    ctx.notify_enabled)
@@ -115,7 +116,8 @@ async def run_source(source, ctx: DaemonContext) -> None:
 async def run_tick(ctx: DaemonContext, db: Database) -> None:
     """扫描 sources 表：到期（now ≥ last_run + 当前 interval_s）的启用来源各执行一次。
 
-    到期时间按当次扫描时的 interval_s 现算——来源改间隔在下一个 tick 即按新值生效。
+    last_run 记派发时刻（预算熔断跳过同样推进，避免熔断期每 tick 刷告警）；
+    到期时间按当次扫描时的 interval_s 现算——改间隔在下一个 tick 即按新值生效。
     """
     now = ctx.clock()
     for src in enabled_sources(db):
@@ -123,8 +125,8 @@ async def run_tick(ctx: DaemonContext, db: Database) -> None:
         last = ctx.last_run.get(url)
         if last is not None and now < last + timedelta(seconds=src["interval_s"]):
             continue
-        await run_source(src, ctx)
         ctx.last_run[url] = ctx.clock()
+        await run_source(src, ctx)
 
 
 def build_context(settings: dict, *,
@@ -155,8 +157,12 @@ def build_context(settings: dict, *,
 async def main_async(args) -> int:
     logging.basicConfig(level=getattr(logging, args.log_level.upper()),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    settings = yaml.safe_load((REPO_ROOT / args.config).read_text())
-    ctx, db = build_context(settings)
+    try:
+        settings = yaml.safe_load((REPO_ROOT / args.config).read_text())
+        ctx, db = build_context(settings)
+    except (KeyError, RuntimeError, ValueError) as e:
+        logger.error("配置错误：%s", e)
+        return 2
 
     sources = enabled_sources(db)
     if not sources:
@@ -173,8 +179,16 @@ async def main_async(args) -> int:
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
+
+    def _on_signal(sig) -> None:
+        if stop.is_set():  # 第二次信号：在途排干期间允许强制退出
+            logger.error("再次收到 %s，强制退出（在途任务可能中断）", sig.name)
+            os._exit(130)
+        logger.info("收到 %s，等待在途任务排干（再次发送可强制退出）", sig.name)
+        stop.set()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
+        loop.add_signal_handler(sig, _on_signal, sig)
     logger.info("守护进程已启动（tick=%ss，Ctrl-C 优雅退出）", ctx.tick_s)
     await stop.wait()
     logger.info("收到退出信号，等待在途任务排干…")
