@@ -77,3 +77,60 @@ def test_future_schema_version_rejected(tmp_path):
     db.close()
     with pytest.raises(RuntimeError, match="高于"):
         Database(path)
+
+
+# ---------- T5.2：来源配置校验 / 删除 / v1→v2 迁移 ----------
+
+def test_validate_source_rejects_bad_input():
+    db = Database(":memory:")
+    with pytest.raises(ValueError, match="URL"):
+        db.upsert_source("ftp://bad.example", schema_type="NewsItem")
+    with pytest.raises(ValueError, match="schema_type"):
+        db.upsert_source("https://a.example", schema_type="Nope")
+    with pytest.raises(ValueError, match="interval_s"):
+        db.upsert_source("https://a.example", schema_type="NewsItem", interval_s=10)
+
+
+def test_delete_source_and_fk_guard():
+    db = Database(":memory:")
+    sid = db.upsert_source("https://a.example", schema_type="NewsItem")
+    assert db.delete_source(999) is False          # 不存在的 id
+    db.insert_run(url="https://a.example", status="SUCCESS", source_id=sid)
+    with pytest.raises(Exception, match="FOREIGN KEY constraint failed"):
+        db.delete_source(sid)                      # 有关联台账不可删除
+
+
+def test_v1_database_migrates_to_v2(tmp_path):
+    path = tmp_path / "old.db"
+    conn = __import__("sqlite3").connect(path)
+    conn.executescript("""
+    CREATE TABLE sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE,
+        name TEXT, schema_type TEXT NOT NULL, interval_s INTEGER DEFAULT 3600,
+        enabled INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE crawl_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER REFERENCES sources(id),
+        url TEXT NOT NULL, raw_hash TEXT, status TEXT NOT NULL, provider TEXT,
+        model TEXT, input_tokens INTEGER, output_tokens INTEGER,
+        duration_ms INTEGER, error_msg TEXT,
+        created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE extracted_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER REFERENCES crawl_runs(id),
+        source_url TEXT NOT NULL, schema_type TEXT NOT NULL, content TEXT NOT NULL,
+        dedup_hash TEXT UNIQUE, created_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE schema_version (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER NOT NULL,
+        applied_at TEXT DEFAULT (datetime('now')));
+    INSERT INTO schema_version (version) VALUES (1);
+    INSERT INTO sources (url, schema_type, name) VALUES ('https://old.example', 'NewsItem', '旧来源');
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    assert db.conn.execute(
+        "SELECT MAX(version) AS v FROM schema_version").fetchone()["v"] == SCHEMA_VERSION
+    row = db.get_source("https://old.example")
+    assert row["name"] == "旧来源"                # 旧数据保留
+    assert row["use_browser"] == 0 and row["instruction"] == ""  # 新列已补默认值
+    db.close()

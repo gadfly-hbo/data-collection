@@ -1,7 +1,8 @@
-"""T3.4：守护进程核心逻辑测试（注入 fake pipeline，不起真实调度器）。"""
+"""T3.4 + T5.2：守护进程核心逻辑测试（tick 调度模型，注入 fake pipeline）。"""
 import asyncio
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import run_daemon as rd  # noqa: E402
 from core.budget import BudgetExhausted, BudgetGuard  # noqa: E402
 from core.pipeline import RunOutcome, RunStatus  # noqa: E402
-from models.news_schema import NewsItem  # noqa: E402
 from storage.db import Database  # noqa: E402
 
 
@@ -28,32 +28,32 @@ class _FakePipeline:
         return self.outcomes[min(len(self.calls) - 1, len(self.outcomes) - 1)]
 
 
-def _ctx(pipeline, db=None, budget=None, notify_enabled=False) -> rd.DaemonContext:
+def _source(**overrides) -> dict:
+    base = {"id": 7, "url": "https://a.example/1", "schema_type": "NewsItem",
+            "interval_s": 60, "enabled": 1, "use_browser": 0, "instruction": ""}
+    base.update(overrides)
+    return base
+
+
+def _ctx(pipeline, budget=None, notify_enabled=False, clock=None) -> rd.DaemonContext:
     return rd.DaemonContext(pipeline=pipeline, fetcher=None, budget=budget,
-                            worker_lock=asyncio.Lock(),
-                            source_ids={"https://a.example/1": 7},
-                            notify_enabled=notify_enabled)
+                            worker_lock=asyncio.Lock(), notify_enabled=notify_enabled,
+                            clock=clock or rd._utcnow)
 
 
-def _source() -> dict:
-    return {"url": "https://a.example/1", "schema_type": "NewsItem"}
-
-
-def _outcome(status: RunStatus, **kwargs):
+def _outcome(status, **kwargs):
     return RunOutcome(status, "https://a.example/1", **kwargs)
 
 
-# ---------- 来源加载 ----------
+# ---------- 来源加载（sources 表驱动） ----------
 
-def test_load_sources_parses_and_filters_disabled(tmp_path):
-    p = tmp_path / "sources.yaml"
-    p.write_text(
-        "sources:\n"
-        "  - {url: 'https://a.example/1', schema_type: NewsItem, enabled: true}\n"
-        "  - {url: 'https://a.example/2', schema_type: NewsItem, enabled: false}\n",
-        encoding="utf-8")
-    sources = rd.load_sources(p)
-    assert [s["url"] for s in sources] == ["https://a.example/1"]
+def test_enabled_sources_reads_table():
+    db = Database(":memory:")
+    db.upsert_source("https://a.example/1", schema_type="NewsItem", name="A")
+    db.upsert_source("https://b.example/2", schema_type="NewsItem", name="B",
+                     enabled=False)
+    rows = rd.enabled_sources(db)
+    assert [r["url"] for r in rows] == ["https://a.example/1"]  # 停用来源不出现
 
 
 # ---------- 单来源任务 ----------
@@ -72,8 +72,7 @@ async def test_budget_exhausted_skips_without_llm_call(caplog):
 
 async def test_blocked_logs_error_and_notifies(caplog, monkeypatch):
     sent: list[tuple[str, str, bool]] = []
-    monkeypatch.setattr(rd, "notify",
-                        lambda t, m, e: sent.append((t, m, e)))
+    monkeypatch.setattr(rd, "notify", lambda t, m, e: sent.append((t, m, e)))
     pipeline = _FakePipeline(outcomes=[_outcome(RunStatus.BLOCKED, error="403")])
     caplog.set_level(logging.ERROR, logger="daemon")
 
@@ -95,13 +94,14 @@ async def test_provider_exception_logs_error_and_notifies(caplog, monkeypatch):
     assert sent and sent[0][0] == "采集任务异常"
 
 
-async def test_success_passes_source_id_and_logs(caplog):
+async def test_run_source_passes_source_id_and_browser_flag(caplog):
     pipeline = _FakePipeline(outcomes=[_outcome(RunStatus.SUCCESS, run_id=42)])
     caplog.set_level(logging.INFO, logger="daemon")
 
-    await rd.run_source(_source(), _ctx(pipeline))
+    await rd.run_source(_source(use_browser=1), _ctx(pipeline))
 
-    assert pipeline.calls[0].source_id == 7  # 台账关联 sources 表
+    spec = pipeline.calls[0]
+    assert spec.source_id == 7 and spec.use_browser is True  # 台账关联 + 站点级开关
     assert any("run_id=42" in r.message for r in caplog.records)
 
 
@@ -116,16 +116,68 @@ async def test_worker_lock_serializes_concurrent_sources():
             return _outcome(RunStatus.SUCCESS)
 
     ctx = _ctx(_SlowPipeline())
-    await asyncio.gather(rd.run_source({"url": "https://a.example/1",
-                                        "schema_type": "NewsItem"}, ctx),
-                         rd.run_source({"url": "https://a.example/2",
-                                        "schema_type": "NewsItem"}, ctx))
-    # 严格串行：不存在交叉执行
+    await asyncio.gather(rd.run_source(_source(), ctx),
+                         rd.run_source(_source(url="https://a.example/2"), ctx))
     assert events == ["start:https://a.example/1", "end:https://a.example/1",
                       "start:https://a.example/2", "end:https://a.example/2"]
 
 
-def test_build_context_upserts_sources_and_wires_budget(monkeypatch, tmp_path):
+# ---------- T5.2：tick 调度（sources 表每轮读取，配置变更即时生效） ----------
+
+async def test_tick_runs_enabled_sources_only():
+    db = Database(":memory:")
+    db.upsert_source("https://a.example/1", schema_type="NewsItem", interval_s=60)
+    db.upsert_source("https://b.example/2", schema_type="NewsItem", interval_s=60,
+                     enabled=False)
+    pipeline = _FakePipeline(outcomes=[_outcome(RunStatus.SUCCESS)])
+    ctx = _ctx(pipeline)
+
+    await rd.run_tick(ctx, db)
+    assert [s.url for s in pipeline.calls] == ["https://a.example/1"]
+
+
+async def test_tick_respects_interval_before_rerun():
+    db = Database(":memory:")
+    db.upsert_source("https://a.example/1", schema_type="NewsItem", interval_s=60)
+    pipeline = _FakePipeline(outcomes=[_outcome(RunStatus.SUCCESS)])
+    clock = {"now": datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)}
+    ctx = _ctx(pipeline, clock=lambda: clock["now"])
+
+    await rd.run_tick(ctx, db)
+    await rd.run_tick(ctx, db)                          # 未到期：不重复执行
+    assert len(pipeline.calls) == 1
+
+    clock["now"] += timedelta(seconds=30)
+    await rd.run_tick(ctx, db)
+    assert len(pipeline.calls) == 1
+
+    clock["now"] += timedelta(seconds=31)               # 超过 interval_s=60
+    await rd.run_tick(ctx, db)
+    assert len(pipeline.calls) == 2
+
+
+async def test_interval_change_takes_effect_next_tick():
+    db = Database(":memory:")
+    db.upsert_source("https://a.example/1", schema_type="NewsItem", interval_s=60)
+    pipeline = _FakePipeline(outcomes=[_outcome(RunStatus.SUCCESS)])
+    clock = {"now": datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)}
+    ctx = _ctx(pipeline, clock=lambda: clock["now"])
+
+    await rd.run_tick(ctx, db)
+    # 面板把间隔从 60s 改为 3600s → 下一次到期时间按新间隔计算
+    db.upsert_source("https://a.example/1", schema_type="NewsItem", interval_s=3600)
+    clock["now"] += timedelta(seconds=60)
+    await rd.run_tick(ctx, db)
+    assert len(pipeline.calls) == 1                     # 新间隔下仍未到期
+
+    clock["now"] += timedelta(seconds=3600)
+    await rd.run_tick(ctx, db)
+    assert len(pipeline.calls) == 2
+
+
+# ---------- 组装 ----------
+
+def test_build_context_wires_components(monkeypatch):
     monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
     settings = {
         "provider": {"primary": "gemini", "fallback": "anthropic-compat",
@@ -135,16 +187,11 @@ def test_build_context_upserts_sources_and_wires_budget(monkeypatch, tmp_path):
                          "api_key_env": "MINIMAX_API_KEY", "rpm": 30}},
         "budget": {"max_tasks_per_day": 5, "max_input_tokens_per_day": 1000},
         "alerts": {"macos_notify": True},
+        "scheduler": {"tick_s": 15},
     }
-    sources = [{"url": "https://a.example/1", "schema_type": "NewsItem",
-                "name": "A", "interval_s": 60, "enabled": True}]
-
     db = Database(":memory:")
-    ctx, db2 = rd.build_context(settings, sources, db=db)
-
-    assert ctx.source_ids == {"https://a.example/1": 1}
+    ctx, db2 = rd.build_context(settings, db=db)
+    assert ctx.tick_s == 15
     assert ctx.budget is not None and ctx.budget.max_tasks == 5
     assert ctx.notify_enabled is True
-    row = db2.get_source("https://a.example/1")
-    assert row["name"] == "A" and row["interval_s"] == 60
-    ctx.pipeline.provider  # 组装栈可访问
+    assert db2 is db

@@ -1,8 +1,8 @@
-"""后台守护进程：APScheduler 按 sources.yaml 定时采集。
+"""后台守护进程：周期 tick 扫描 sources 表，按 interval_s 调度采集。
 
-单 Worker 串行执行（SQLite 单写 + 同域限速，AGENTS.md 硬性规则）；
-SIGINT/SIGTERM 排干在途任务后退出；blocked 与供应商级异常（认证失败等）
-走 ERROR 日志 + 可选 macOS 本地通知。
+调度模型：单个 APScheduler tick 任务（默认每 30s）从 sources 表读取启用来源——
+面板 / 迁移脚本对来源的新增、启停、改间隔在下一个 tick 即生效（T5.2）；
+单 Worker 串行（SQLite 单写 + 同域限速）；SIGINT/SIGTERM 排干在途任务后退出。
 """
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ import pathlib
 import signal
 import subprocess
 import sys
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -40,14 +41,20 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 logger = logging.getLogger("daemon")
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @dataclass
 class DaemonContext:
     pipeline: Pipeline
     fetcher: Fetcher
     budget: BudgetGuard | None
     worker_lock: asyncio.Lock
-    source_ids: dict[str, int]
     notify_enabled: bool = False
+    tick_s: int = 30
+    last_run: dict[str, datetime] = field(default_factory=dict)  # url → 上次执行时刻
+    clock: Callable[[], datetime] = _utcnow
 
 
 def notify(title: str, message: str, enabled: bool) -> None:
@@ -64,12 +71,12 @@ def notify(title: str, message: str, enabled: bool) -> None:
         logger.warning("通知发送失败：%s", e)
 
 
-def load_sources(path: pathlib.Path) -> list[dict]:
-    data = yaml.safe_load(path.read_text())
-    return [s for s in data.get("sources", []) if s.get("enabled", True)]
+def enabled_sources(db: Database) -> list:
+    return db.conn.execute(
+        "SELECT * FROM sources WHERE enabled = 1 ORDER BY id").fetchall()
 
 
-async def run_source(source: dict, ctx: DaemonContext) -> None:
+async def run_source(source, ctx: DaemonContext) -> None:
     """单来源采集：串行 Worker + 预算闸门 + 告警出口。"""
     url = source["url"]
     async with ctx.worker_lock:
@@ -81,8 +88,9 @@ async def run_source(source: dict, ctx: DaemonContext) -> None:
                 return
         spec = TaskSpec(url=url,
                         schema=get_schema(source["schema_type"]),
-                        instruction=source.get("instruction") or "",
-                        source_id=ctx.source_ids.get(url))
+                        instruction=source["instruction"] or "",
+                        source_id=source["id"],
+                        use_browser=bool(source["use_browser"]))
         try:
             outcome = await ctx.pipeline.run(spec)
         except Exception as e:  # 认证失败等供应商级异常：告警并继续调度
@@ -104,9 +112,23 @@ async def run_source(source: dict, ctx: DaemonContext) -> None:
                            outcome.error)
 
 
-def build_context(settings: dict, sources: list[dict], *,
+async def run_tick(ctx: DaemonContext, db: Database) -> None:
+    """扫描 sources 表：到期（now ≥ last_run + 当前 interval_s）的启用来源各执行一次。
+
+    到期时间按当次扫描时的 interval_s 现算——来源改间隔在下一个 tick 即按新值生效。
+    """
+    now = ctx.clock()
+    for src in enabled_sources(db):
+        url = src["url"]
+        last = ctx.last_run.get(url)
+        if last is not None and now < last + timedelta(seconds=src["interval_s"]):
+            continue
+        await run_source(src, ctx)
+        ctx.last_run[url] = ctx.clock()
+
+
+def build_context(settings: dict, *,
                   db: Database | None = None) -> tuple[DaemonContext, Database]:
-    """组装上下文；来源白名单 upsert 进 sources 表（台账记 source_id）。"""
     db = db or Database(REPO_ROOT / "data" / "collector.db")
     fetch_cfg = settings.get("fetch", {})
     fetcher = Fetcher(
@@ -119,19 +141,14 @@ def build_context(settings: dict, sources: list[dict], *,
                           max_input_tokens_per_day=budget_cfg[
                               "max_input_tokens_per_day"])
               if budget_cfg else None)
-    source_ids: dict[str, int] = {}
-    for src in sources:
-        source_ids[src["url"]] = db.upsert_source(
-            src["url"], schema_type=src["schema_type"], name=src.get("name"),
-            interval_s=int(src.get("interval_s", 3600)),
-            enabled=bool(src.get("enabled", True)))
     pipeline = Pipeline(fetcher, create_provider_stack(settings["provider"]),
                         raw_store=RawStore(REPO_ROOT / "data" / "raw"),
                         dedup=DedupGate(db), ledger=RunLedger(db))
     ctx = DaemonContext(
         pipeline=pipeline, fetcher=fetcher, budget=budget,
-        worker_lock=asyncio.Lock(), source_ids=source_ids,
-        notify_enabled=(settings.get("alerts") or {}).get("macos_notify", False))
+        worker_lock=asyncio.Lock(),
+        notify_enabled=(settings.get("alerts") or {}).get("macos_notify", False),
+        tick_s=int((settings.get("scheduler") or {}).get("tick_s", 30)))
     return ctx, db
 
 
@@ -139,28 +156,26 @@ async def main_async(args) -> int:
     logging.basicConfig(level=getattr(logging, args.log_level.upper()),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = yaml.safe_load((REPO_ROOT / args.config).read_text())
-    sources = load_sources(REPO_ROOT / args.sources)
+    ctx, db = build_context(settings)
+
+    sources = enabled_sources(db)
     if not sources:
-        logger.error("sources.yaml 无启用的采集来源，退出")
+        logger.error("sources 表无启用来源——先运行 scripts/import_sources.py "
+                     "迁移 sources.yaml，或在面板中添加来源")
         return 2
-    ctx, db = build_context(settings, sources)
+    logger.info("启用来源 %d 个：%s", len(sources), [s["url"] for s in sources])
 
     scheduler = AsyncIOScheduler(timezone="UTC")
-    now = datetime.now(timezone.utc)
-    for i, src in enumerate(sources):
-        interval = int(src.get("interval_s", 3600))
-        scheduler.add_job(run_source, "interval", seconds=interval,
-                          args=[src, ctx], id=f"source:{src['url']}",
-                          next_run_time=now + timedelta(seconds=i * 5),  # 错峰首跑
-                          max_instances=1, coalesce=True)
-        logger.info("调度来源 %s（间隔 %ss）", src["url"], interval)
+    scheduler.add_job(run_tick, "interval", seconds=ctx.tick_s,
+                      args=[ctx, db], id="tick", next_run_time=_utcnow(),
+                      max_instances=1, coalesce=True)
     scheduler.start()
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
-    logger.info("守护进程已启动（Ctrl-C 优雅退出）")
+    logger.info("守护进程已启动（tick=%ss，Ctrl-C 优雅退出）", ctx.tick_s)
     await stop.wait()
     logger.info("收到退出信号，等待在途任务排干…")
     scheduler.shutdown(wait=True)
@@ -171,9 +186,8 @@ async def main_async(args) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="定时采集守护进程")
+    parser = argparse.ArgumentParser(description="定时采集守护进程（sources 表驱动）")
     parser.add_argument("--config", default="config/settings.yaml")
-    parser.add_argument("--sources", default="config/sources.yaml")
     parser.add_argument("--log-level", default="INFO")
     return asyncio.run(main_async(parser.parse_args()))
 
