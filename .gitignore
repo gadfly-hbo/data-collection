@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 测试与工具缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 密钥（只提交 .env.example）
+.env
+
+# 运行时产物（快照与本地数据库）
+data/
+
+# macOS
+.DS_Store
