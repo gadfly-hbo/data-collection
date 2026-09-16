@@ -158,13 +158,14 @@ def _wired_pipeline(provider, tmp_path, html_by_call: list[str]):
 
     from core.dedup import DedupGate
     from storage.db import Database
+    from storage.ledger import RunLedger
     from storage.raw_store import RawStore
 
     fetcher = Fetcher("TestBot/1.0", min_interval_per_host_s=0,
                       transport=httpx.MockTransport(handle))
     db = Database(":memory:")
     return Pipeline(fetcher, provider, raw_store=RawStore(tmp_path / "raw"),
-                    dedup=DedupGate(db)), db
+                    dedup=DedupGate(db), ledger=RunLedger(db)), db
 
 
 async def test_second_identical_run_skips_with_zero_llm_calls(tmp_path):
@@ -184,8 +185,10 @@ async def test_second_identical_run_skips_with_zero_llm_calls(tmp_path):
 
 async def test_same_url_new_content_re_extracts(tmp_path):
     provider = FakeProvider([_result()])
-    pipeline, _ = _wired_pipeline(provider, tmp_path,
-                                  [ARTICLE_HTML, ARTICLE_HTML + "<p>新增段落，内容有更新</p>"])
+    # 更新段落必须位于正文内——文档尾部追加会被 trafilatura 正确忽略（内容未变）
+    updated = ARTICLE_HTML.replace(
+        "</article>", "<p>更新：研究团队补充了 256 比特的新实验数据。</p></article>")
+    pipeline, _ = _wired_pipeline(provider, tmp_path, [ARTICLE_HTML, updated])
     task = TaskSpec(url="https://a.example/story", schema=NewsItem)
 
     first = await pipeline.run(task)

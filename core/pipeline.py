@@ -17,6 +17,7 @@ from core.fetcher import FetchStatus, Fetcher
 from core.parser import extract_markdown
 from core.providers.base import LLMProvider
 from core.status import RunStatus  # noqa: F401  再导出，兼容既有导入路径
+from storage.ledger import RunLedger
 from storage.raw_store import RawStore
 
 _MAX_ERROR_LEN = 160
@@ -37,6 +38,7 @@ class TaskSpec:
     url: str
     schema: type[BaseModel]
     instruction: str = ""
+    source_id: int | None = None  # 定时任务关联 sources 表；ad-hoc 任务为空
 
 
 @dataclass
@@ -51,6 +53,7 @@ class RunOutcome:
     model: str = ""
     duration_ms: int = 0
     error: str | None = None
+    run_id: int | None = None    # 台账写入后回填
 
     @property
     def ok(self) -> bool:
@@ -62,23 +65,29 @@ class RunOutcome:
 class Pipeline:
     """绑定一对 Fetcher 与 LLMProvider，逐任务执行采集流水线。
 
-    raw_store / dedup 为可选组件（None = 关闭该环节，供单测使用）；
+    raw_store / dedup / ledger 为可选组件（None = 关闭该环节，供单测使用）；
     生产入口（run_once / run_daemon）必须全部接通——先落快照、过去重
-    闸门、再花 LLM 调用的顺序不可颠倒（AGENTS.md 约定）。
+    闸门、再花 LLM 调用的顺序不可颠倒（AGENTS.md 约定），终态全量记台账。
     """
 
     def __init__(self, fetcher: Fetcher, provider: LLMProvider,
                  raw_store: RawStore | None = None,
-                 dedup: DedupGate | None = None):
+                 dedup: DedupGate | None = None,
+                 ledger: RunLedger | None = None):
         self.fetcher = fetcher
         self.provider = provider
         self.raw_store = raw_store
         self.dedup = dedup
+        self.ledger = ledger
 
     async def run(self, task: TaskSpec) -> RunOutcome:
         start = time.monotonic()
         outcome = await self._run(task)
         outcome.duration_ms = int((time.monotonic() - start) * 1000)
+        if self.ledger is not None:
+            outcome.run_id = self.ledger.record(outcome,
+                                                schema_type=task.schema.__name__,
+                                                source_id=task.source_id)
         return outcome
 
     async def _run(self, task: TaskSpec) -> RunOutcome:

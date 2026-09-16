@@ -18,10 +18,14 @@ load_dotenv()
 
 import yaml  # noqa: E402
 
+from core.dedup import DedupGate  # noqa: E402
 from core.fetcher import Fetcher  # noqa: E402
 from core.pipeline import Pipeline, TaskSpec  # noqa: E402
 from core.providers.factory import resolve_provider  # noqa: E402
 from models.registry import get_schema  # noqa: E402
+from storage.db import Database  # noqa: E402
+from storage.ledger import RunLedger  # noqa: E402
+from storage.raw_store import RawStore  # noqa: E402
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -47,12 +51,16 @@ async def _run(args: argparse.Namespace) -> int:
         _emit({"error": str(e)})
         return 2
 
+    db = Database(REPO_ROOT / "data" / "collector.db")
     async with Fetcher(
         user_agent=fetch_cfg.get("user_agent", "DataCollectorBot/0.1"),
         min_interval_per_host_s=fetch_cfg.get("min_interval_per_host_s", 5.0),
         respect_robots=fetch_cfg.get("respect_robots", True),
     ) as fetcher:
-        pipeline = Pipeline(fetcher, provider)
+        pipeline = Pipeline(fetcher, provider,
+                            raw_store=RawStore(REPO_ROOT / "data" / "raw"),
+                            dedup=DedupGate(db),
+                            ledger=RunLedger(db))
         try:
             outcome = await pipeline.run(
                 TaskSpec(url=args.url, schema=schema, instruction=args.instruction))
@@ -62,6 +70,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     _emit({
         "status": outcome.status.value,
+        "run_id": outcome.run_id,
         "url": outcome.url,
         "provider": outcome.provider,
         "model": outcome.model,
