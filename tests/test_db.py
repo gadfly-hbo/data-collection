@@ -64,7 +64,7 @@ def test_insert_item_dedup_hash_unique(tmp_path):
 
 def test_item_foreign_key_enforced(tmp_path):
     db = Database(":memory:")
-    with pytest.raises(Exception, match=" FOREIGN KEY|foreign key"):
+    with pytest.raises(Exception, match="FOREIGN KEY constraint failed"):
         db.insert_item(run_id=999, source_url="https://x", schema_type="NewsItem",
                        content=_news_content(), dedup_hash="ee" * 32)
 
