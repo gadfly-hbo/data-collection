@@ -455,7 +455,7 @@ Day 7~8  ▌ Phase 4: 扩展能力与生产封装
 | 实现 `parse_response` 强类型校验（含一次纠错重试） | `core/pipeline.py` |
 | 端对端验证脚本：采集公开网页并打印结构化输出 | `scripts/run_once.py` |
 
-**验收标准**：`run_once.py --url https://news.ycombinator.com` 打印通过 Pydantic 校验的 JSON 对象，成功率 ≥ 90%；同时输出单任务 Token 消耗实测值（此数据直接决定 Phase 3 的日预算参数）。
+**验收标准**：`run_once.py --url <有正文页面>` 打印通过 Pydantic 校验的 JSON 对象，连跑 10 次成功率 ≥ 90%，并输出单任务 Token 消耗实测值（此数据直接决定 Phase 3 的日预算参数）。目标页修订（2026-09-16）：HN 首页实测为聚合列表页，按设计记 `SKIPPED_NO_CONTENT`（见 §10 两段式采集）；验收目标改为 Wikipedia 词条页，HN 首页保留为 SKIPPED 负样本用例。
 
 ### Phase 2：存储流水线与去重闭环（Day 3~4）
 

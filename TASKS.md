@@ -50,11 +50,11 @@
 - **内容**：`core/pipeline.py`（fetch → parse → extract → 校验 → 输出；`validate_or_retry_once` 失败后全新调用一次，instruction 附失败原因；快照/去重/台账此阶段先留桩接口）；`scripts/run_once.py`（`--url` 与 `--schema` 参数）。
 - **依赖**：T1.3、T1.4、T1.5。
 - **验收**：
-  - [ ] `run_once.py --url https://news.ycombinator.com` 打印通过 Pydantic 校验的 JSON
-  - [ ] 连跑 10 次成功率 ≥ 90%，输出含每次的 input/output tokens
-  - [ ] 失败任务给出可读错误而非堆栈崩溃
+  - [x] `run_once.py --url <有正文页面>` 打印通过 Pydantic 校验的 JSON（目标页修订：HN 首页经实测为聚合列表页，被解析层按设计判为 `SKIPPED_NO_CONTENT`——T1.4 高精度模式的预期行为、PLAN §10 两段式采集的目标场景；端对端验收目标改为 `https://en.wikipedia.org/wiki/Web_scraping`，HN 首页保留为 SKIPPED 负样本并验证通过、0 次 LLM 调用）
+  - [x] 连跑 10 次成功率 ≥ 90%，输出含每次的 input/output tokens（实测 10/10，数据见参数记录区）
+  - [x] 失败任务给出可读错误而非堆栈崩溃（供应商异常与配置错误均输出 JSON error 字段，退出码区分 0/1/2）
 
-**阶段闸门 1**：以上全部通过，且 Token 基线数据已记录。此数据用于校准 Phase 3 的 `budget` 参数；若实测消耗换算的日可跑任务数远低于预期（< 100），先回到 PLAN.md §8 复核配额策略再继续。
+**阶段闸门 1**：✅ 已通过（2026-09-16）——Phase 1 全部任务验收通过，Token 基线已记录。基线结论：单任务 output ≈ 242 tokens（227~264）；MiniMax 端点的 `usage.input_tokens` 在 10 次真实运行中 9 次报 1、仅 1 次报真实值（≈6.7k，与页面字符数吻合），**T3.3 预算熔断不能依赖该端点的 input 上报**，应按任务数 + 内容长度估算（chars/4）设计。MiniMax 通道暂无免费层日限额约束；后续接入 Gemini 免费层时按其 RPD 复核日可跑任务数。
 
 ---
 
@@ -164,9 +164,10 @@
 
 | 指标 | 实测值 | 记录任务 |
 | :--- | :--- | :--- |
-| 单任务 input tokens | 1（* MiniMax-M3 冒烟样本值；该端点 input 计费口径存疑——探测小样本曾报 40，T1.6 端对端时复核） | T1.5 |
-| 单任务 output tokens | 146~152（* MiniMax-M3 样例正文结构化抽取，两次实测区间；T1.6 换真实网页复核） | T1.5 |
-| 单任务端到端耗时（均值） | ~2s（* 冒烟样本；T1.6 端对端含抓取后复核） | T1.6 |
+| 单任务 input tokens | ≈6.7k / 2.7 万字符页面（按 chars/4 估算）；⚠️ MiniMax 端点 `usage.input_tokens` 10 次里 9 次报 1，不可用于预算统计 | T1.6 复核 |
+| 单任务 output tokens | 242（227~264，10 次真实页面实测区间） | T1.6 复核 |
+| 单任务端到端耗时（均值） | 3.7s（2429~6838ms，含抓取+正文抽取+提取） | T1.6 |
+| 免费层实测日可支撑任务数 | MiniMax 通道暂无免费层日限额（按 6.7k in + 250 out/任务估算成本）；Gemini 免费层接入后复核 | 阶段闸门 1 |
 | 免费层实测日可支撑任务数 | 待推算 | 阶段闸门 1 |
 | `budget.max_tasks_per_day` 定值 | 待定 | T3.3 |
 | `budget.max_input_tokens_per_day` 定值 | 待定 | T3.3 |

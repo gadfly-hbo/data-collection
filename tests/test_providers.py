@@ -128,25 +128,15 @@ def test_missing_api_key_rejected(monkeypatch):
 
 # ---------- live 冒烟：按 settings.yaml 与可用 Key 自动选供应商（默认跳过） ----------
 
-_ENV_BY_PROVIDER = {
-    "gemini": "GEMINI_API_KEY",
-    "anthropic-compat": "ANTHROPIC_API_KEY",
-    "openai-compat": "OPENAI_API_KEY",
-}
-
-
 def _pick_live_provider():
+    from core.providers.factory import resolve_provider
+
     provider_cfg = yaml.safe_load(
         (ROOT / "config" / "settings.yaml").read_text())["provider"]
-    for name in (provider_cfg.get("primary"), provider_cfg.get("fallback")):
-        opts = provider_cfg.get(name) or {}
-        key_env = opts.get("api_key_env", _ENV_BY_PROVIDER.get(name, ""))
-        if key_env and os.environ.get(key_env):
-            try:
-                return create_provider(name, opts)
-            except RuntimeError:
-                continue
-    pytest.skip("无可用供应商 Key（GEMINI_API_KEY / MINIMAX_API_KEY 等）")
+    try:
+        return resolve_provider(provider_cfg)
+    except RuntimeError as e:
+        pytest.skip(str(e))
 
 
 @pytest.mark.live

@@ -26,3 +26,19 @@ def create_provider(name: str, opts: dict | None = None) -> LLMProvider:
         )
     # openai-compat 按 TASKS T4.2 在 Phase 4 实现
     raise ValueError(f"未知 provider: {name!r}")
+
+
+def resolve_provider(provider_cfg: dict) -> LLMProvider:
+    """按 primary → fallback 顺序返回第一个可构造的 provider（缺 Key 自动跳过）。"""
+    problems: list[str] = []
+    for name in (provider_cfg.get("primary"), provider_cfg.get("fallback")):
+        if not name:
+            continue
+        try:
+            return create_provider(name, provider_cfg.get(name) or {})
+        except (RuntimeError, ValueError) as e:
+            problems.append(f"{name}: {e}")
+    raise RuntimeError(
+        "无可用 LLM 供应商（请在 .env / 环境变量配置对应 Key）：\n  "
+        + "\n  ".join(problems)
+    )
