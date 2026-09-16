@@ -13,16 +13,24 @@ provider:
     api_key_env: MINIMAX_API_KEY
     max_tokens: 16384          # M3 为思考型模型，输出含思考 token，需留余量
     rpm: 30                    # 主动限速（次/分钟），按实际配额调整
-  openai-compat:               # OpenAI 协议端点（Phase 4 / T4.2 实现）
+  openai-compat:               # OpenAI 协议端点：OpenAI / DeepSeek / OpenRouter / Ollama 等
     model: deepseek-chat       # 亦可为 OpenRouter 免费模型或本地 Ollama 模型
     base_url: https://api.deepseek.com/v1
     api_key_env: DEEPSEEK_API_KEY
+    response_format: json_schema  # 端点不支持时改 json_object 或 none（纯 Prompt 约束）
 
 # 日预算熔断（任务数 / Token 数双上限，超限当日停止派发新任务）
 # 按 T1.5/T1.6 实测基线校准：单任务 input 0.7万~2.8万（chars/4 估算）、output ~240
 budget:
   max_tasks_per_day: 300
   max_input_tokens_per_day: 3000000
+
+# 守护进程 tick 扫描周期（秒）：sources 表的配置变更在此周期内生效
+scheduler:
+  tick_s: 30
+
+alerts:
+  macos_notify: false          # BLOCKED / 认证失败时发 macOS 本地通知
 
 fetch:
   min_interval_per_host_s: 5   # 同一域名两次请求的最小间隔

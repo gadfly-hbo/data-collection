@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from core.providers.anthropic_compat import AnthropicCompatProvider
 from core.providers.base import ExtractionResult, LLMProvider, TransientProviderError
 from core.providers.gemini import GeminiProvider
+from core.providers.openai_compat import OpenAICompatProvider
 from core.rate_limiter import RateLimitedProvider, with_backoff
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,13 @@ def create_provider(name: str, opts: dict | None = None) -> LLMProvider:
             api_key_env=opts.get("api_key_env", "ANTHROPIC_API_KEY"),
             max_tokens=opts.get("max_tokens", 16384),
         )
-    # openai-compat 按 TASKS T4.2 在 Phase 4 实现
+    if name == "openai-compat":
+        return OpenAICompatProvider(
+            model=opts["model"],
+            base_url=opts.get("base_url"),
+            api_key_env=opts.get("api_key_env", "OPENAI_API_KEY"),
+            response_format=opts.get("response_format", "json_schema"),
+        )
     raise ValueError(f"未知 provider: {name!r}")
 
 
@@ -93,6 +100,7 @@ def create_provider_stack(provider_cfg: dict) -> LLMProvider:
         )
 
     effective_name, effective = built[0]
-    inner = FallbackProvider(effective, built[1][1]) if len(built) > 1 else effective
+    # 统一包一层 FallbackProvider：即使无备用也获得瞬态错误退避重试
+    inner = FallbackProvider(effective, built[1][1] if len(built) > 1 else None)
     rpm = (provider_cfg.get(effective_name) or {}).get("rpm")
     return RateLimitedProvider(inner, rpm)

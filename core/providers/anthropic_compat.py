@@ -13,48 +13,9 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
 from core.providers.base import ExtractionResult, TransientProviderError, normalize_provider_error
+from core.providers.json_text import extract_json_object, strip_code_fence
 
 T = TypeVar("T", bound=BaseModel)
-
-
-def _strip_code_fence(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        first_line_break = text.find("\n")
-        if first_line_break != -1:  # 掉落 ```json 等语言标记行
-            text = text[first_line_break + 1:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-    return text.strip()
-
-
-def _extract_json_object(text: str) -> str:
-    """从文本中提取第一个完整的最外层 JSON 对象（感知字符串内的花括号）。
-
-    兼容模型在 JSON 前后偶发附加说明文字的情况。
-    """
-    start = text.find("{")
-    if start == -1:
-        return text
-    depth, in_string, escape = 0, False, False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-        elif ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return text[start:]
 
 
 class AnthropicCompatProvider:
@@ -105,7 +66,7 @@ class AnthropicCompatProvider:
             raise RuntimeError(f"供应商返回空响应（stop_reason={resp.stop_reason}）")
 
         try:
-            item = schema.model_validate_json(_extract_json_object(_strip_code_fence(text)))
+            item = schema.model_validate_json(extract_json_object(strip_code_fence(text)))
         except ValueError as e:
             raise ValueError(
                 f"响应不是合法的 {schema.__name__}，原始内容片段：{text[:200]}"
