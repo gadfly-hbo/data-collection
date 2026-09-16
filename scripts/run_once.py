@@ -18,6 +18,7 @@ load_dotenv()
 
 import yaml  # noqa: E402
 
+from core.budget import BudgetExhausted, BudgetGuard  # noqa: E402
 from core.dedup import DedupGate  # noqa: E402
 from core.fetcher import Fetcher  # noqa: E402
 from core.pipeline import Pipeline, TaskSpec  # noqa: E402
@@ -52,6 +53,18 @@ async def _run(args: argparse.Namespace) -> int:
         return 2
 
     db = Database(REPO_ROOT / "data" / "collector.db")
+
+    budget_cfg = settings.get("budget") or {}
+    if budget_cfg:
+        budget = BudgetGuard(db,
+                             max_tasks_per_day=budget_cfg["max_tasks_per_day"],
+                             max_input_tokens_per_day=budget_cfg["max_input_tokens_per_day"])
+        try:
+            budget.check()
+        except BudgetExhausted as e:
+            _emit({"error": str(e)})
+            return 2
+
     async with Fetcher(
         user_agent=fetch_cfg.get("user_agent", "DataCollectorBot/0.1"),
         min_interval_per_host_s=fetch_cfg.get("min_interval_per_host_s", 5.0),

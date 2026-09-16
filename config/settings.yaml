@@ -19,9 +19,10 @@ provider:
     api_key_env: DEEPSEEK_API_KEY
 
 # 日预算熔断（任务数 / Token 数双上限，超限当日停止派发新任务）
+# 按 T1.5/T1.6 实测基线校准：单任务 input 0.7万~2.8万（chars/4 估算）、output ~240
 budget:
   max_tasks_per_day: 300
-  max_input_tokens_per_day: 2000000
+  max_input_tokens_per_day: 3000000
 
 fetch:
   min_interval_per_host_s: 5   # 同一域名两次请求的最小间隔
