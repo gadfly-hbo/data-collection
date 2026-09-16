@@ -9,13 +9,13 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 
 from pydantic import BaseModel, ValidationError
 
 from core.fetcher import FetchStatus, Fetcher
 from core.parser import extract_markdown
 from core.providers.base import LLMProvider
+from core.status import RunStatus  # noqa: F401  再导出，兼容既有导入路径
 
 _MAX_ERROR_LEN = 160
 
@@ -24,17 +24,6 @@ _RETRY_HINT = (
     "请重新输出一个严格符合 Schema 的 JSON 对象：禁止解释文字、注释与"
     " Markdown 代码块标记。"
 )
-
-
-class RunStatus(str, Enum):
-    """任务终态，取值以 PLAN.md §5.5 为准。"""
-
-    SUCCESS = "SUCCESS"
-    FETCH_ERROR = "FETCH_ERROR"
-    BLOCKED = "BLOCKED"
-    SKIPPED_UNCHANGED = "SKIPPED_UNCHANGED"
-    SKIPPED_NO_CONTENT = "SKIPPED_NO_CONTENT"
-    SCHEMA_ERROR = "SCHEMA_ERROR"
 
 
 def _brief(err: Exception, limit: int = _MAX_ERROR_LEN) -> str:

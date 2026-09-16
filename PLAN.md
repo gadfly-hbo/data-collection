@@ -361,6 +361,7 @@ CREATE TABLE IF NOT EXISTS sources (
 CREATE TABLE IF NOT EXISTS crawl_runs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id      INTEGER REFERENCES sources(id),
+    url            TEXT NOT NULL,           -- 任务目标 URL（ad-hoc 任务 source_id 为空，url 必随行）
     raw_hash       TEXT,
     status         TEXT NOT NULL,           -- SUCCESS / FETCH_ERROR / BLOCKED /
                                             -- SKIPPED_UNCHANGED / SKIPPED_NO_CONTENT / SCHEMA_ERROR
@@ -386,6 +387,8 @@ CREATE TABLE IF NOT EXISTS extracted_items (
 
 -- 建议附加上 schema_version 元数据表，便于后续迁移
 ```
+
+> **修订（2026-09-16，Phase 2 实施时）**：`crawl_runs` 增加 `url` 列——`run_once` 的 ad-hoc 任务不经过 `sources` 表，失败排查与去重判断都需要 url 随行；`schema_version` 已按本节建议落地，版本高于代码支持值时拒绝打开（防止旧程序写新库）。
 
 ---
 
