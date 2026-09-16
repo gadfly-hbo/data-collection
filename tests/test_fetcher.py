@@ -1,8 +1,8 @@
-"""T1.3：Fetcher 验收测试（robots 三分支、限速、状态分类、条件请求）。"""
+"""T1.3 + T4.3：Fetcher 验收测试（robots 三分支、限速、状态分类、条件请求、浏览器路径）。"""
 import pytest
 import httpx
 
-from core.fetcher import FetchStatus, Fetcher
+from core.fetcher import BrowserUnavailable, FetchStatus, Fetcher
 
 UA = "TestBot/1.0"
 
@@ -160,6 +160,55 @@ async def test_redirect_followed():
     assert result.status is FetchStatus.OK
     assert result.url == "https://f.example/new"
     assert result.html and "new" in result.html
+
+
+async def test_browser_unavailable_is_fetch_error(monkeypatch):
+    def no_playwright(self):
+        raise BrowserUnavailable("未安装 playwright：pip install playwright")
+
+    monkeypatch.setattr(Fetcher, "_load_playwright", no_playwright)
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("/robots.txt"):
+            return httpx.Response(404)
+        raise AssertionError("浏览器路径不应发 httpx 页面请求")
+
+    async with Fetcher(UA, transport=httpx.MockTransport(handle)) as f:
+        result = await f.fetch("https://g.example/page", use_browser=True)
+    assert result.status is FetchStatus.FETCH_ERROR
+    assert result.reason and "playwright" in result.reason
+
+
+def _playwright_installed() -> bool:
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not _playwright_installed(),
+                    reason="需要 playwright + chromium（pip install playwright && playwright install chromium）")
+async def test_js_site_renders_via_browser_live():
+    """静态路径抽不出正文（JS 渲染页），浏览器路径拿到渲染后 DOM。"""
+    from core.parser import extract_markdown
+
+    url = "https://quotes.toscrape.com/js/"
+    async with Fetcher(
+        "DataCollectorBot/0.1 (live smoke; contact: you@example.com)",
+        min_interval_per_host_s=0,
+    ) as f:
+        static = await f.fetch(url)
+        rendered = await f.fetch(url, use_browser=True)
+
+    assert static.status is FetchStatus.OK
+    assert rendered.status is FetchStatus.OK, rendered.reason
+    static_md = extract_markdown(static.html or "", url=url)
+    rendered_md = extract_markdown(rendered.html or "", url=url)
+    assert rendered_md and len(rendered_md) > 200, "浏览器路径应拿到渲染后正文"
+    assert not static_md or len(static_md) * 2 < len(rendered_md), \
+        "静态路径的正文应显著少于渲染后（JS 渲染站点）"
 
 
 @pytest.mark.live

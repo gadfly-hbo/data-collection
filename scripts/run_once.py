@@ -76,7 +76,8 @@ async def _run(args: argparse.Namespace) -> int:
                             ledger=RunLedger(db))
         try:
             outcome = await pipeline.run(
-                TaskSpec(url=args.url, schema=schema, instruction=args.instruction))
+                TaskSpec(url=args.url, schema=schema, instruction=args.instruction,
+                         use_browser=args.browser))
         except Exception as e:  # 供应商级异常等：可读输出，不裸抛堆栈
             _emit({"error": f"{type(e).__name__}: {e}"})
             return 1
@@ -102,6 +103,8 @@ def main() -> int:
     parser.add_argument("--schema", default="NewsItem",
                         help="models/registry.py 中注册的 Schema 类名")
     parser.add_argument("--instruction", default="从以下网页正文提取资讯信息")
+    parser.add_argument("--browser", action="store_true",
+                        help="用 playwright 浏览器渲染（JS 站点；需已安装驱动）")
     parser.add_argument("--config", default="config/settings.yaml")
     return asyncio.run(_run(parser.parse_args()))
 

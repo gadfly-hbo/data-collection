@@ -39,6 +39,7 @@ class TaskSpec:
     schema: type[BaseModel]
     instruction: str = ""
     source_id: int | None = None  # 定时任务关联 sources 表；ad-hoc 任务为空
+    use_browser: bool = False     # JS 渲染站点走浏览器路径（需安装 playwright）
 
 
 @dataclass
@@ -91,7 +92,7 @@ class Pipeline:
         return outcome
 
     async def _run(self, task: TaskSpec) -> RunOutcome:
-        fetched = await self.fetcher.fetch(task.url)
+        fetched = await self.fetcher.fetch(task.url, use_browser=task.use_browser)
         if fetched.status is FetchStatus.BLOCKED:
             return RunOutcome(RunStatus.BLOCKED, task.url, error=fetched.reason)
         if fetched.status is FetchStatus.FETCH_ERROR:

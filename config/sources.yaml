@@ -12,3 +12,4 @@ sources:
     interval_s: 7200
     enabled: true
     instruction: ""
+    # use_browser: true         # 强 JS 渲染站点开启浏览器路径（需安装 playwright 驱动）

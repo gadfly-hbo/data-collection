@@ -38,6 +38,13 @@ class _RobotsUnreachable(Exception):
     """robots.txt 网络层不可达（区别于 5xx 响应）。"""
 
 
+class BrowserUnavailable(Exception):
+    """playwright 未安装或浏览器驱动未就绪。"""
+
+
+_BROWSER_TIMEOUT_MS = 30_000
+
+
 class Fetcher:
     def __init__(
         self,
@@ -61,6 +68,10 @@ class Fetcher:
         self._last_hit: dict[str, float] = {}
         # url → (etag, last_modified)，进程内缓存；持久化随 Phase 2 存储层落地
         self._validators: dict[str, tuple[str | None, str | None]] = {}
+        # 浏览器渲染路径（lazy 初始化，实例跨任务复用）
+        self._playwright = None
+        self._browser = None
+        self._page = None
 
     async def __aenter__(self) -> "Fetcher":
         return self
@@ -69,9 +80,17 @@ class Fetcher:
         await self.aclose()
 
     async def aclose(self) -> None:
+        for resource, closer in ((self._page, "close"), (self._browser, "close"),
+                                 (self._playwright, "stop")):
+            if resource is not None:
+                try:
+                    await getattr(resource, closer)()
+                except Exception:
+                    pass
+        self._page = self._browser = self._playwright = None
         await self._client.aclose()
 
-    async def fetch(self, url: str) -> FetchResult:
+    async def fetch(self, url: str, *, use_browser: bool = False) -> FetchResult:
         if self._respect_robots:
             try:
                 robots = await self._robots_for(url)
@@ -83,6 +102,9 @@ class Fetcher:
                                    reason="robots.txt disallow")
 
         await self._pace(httpx.URL(url).host)
+
+        if use_browser:  # JS 渲染站点：robots 与限速已前置执行
+            return await self._fetch_with_browser(url)
 
         headers: dict[str, str] = {}
         etag, last_modified = self._validators.get(url, (None, None))
@@ -155,3 +177,42 @@ class Fetcher:
 
     async def _sleep(self, seconds: float) -> None:
         await asyncio.sleep(seconds)
+
+    # ---------- 浏览器渲染路径（JS 渲染 / SPA 站点，可选） ----------
+
+    def _load_playwright(self):
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as e:
+            raise BrowserUnavailable(
+                "未安装 playwright：pip install playwright && playwright install chromium") from e
+        return async_playwright
+
+    async def _ensure_page(self):
+        if self._page is None:
+            async_playwright = self._load_playwright()
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(headless=True)
+            self._page = await self._browser.new_page(user_agent=self._ua)
+        return self._page
+
+    async def _fetch_with_browser(self, url: str) -> FetchResult:
+        """真实浏览器渲染后取 DOM；条件请求缓存不适用于该路径。"""
+        try:
+            page = await self._ensure_page()
+            resp = await page.goto(url, wait_until="domcontentloaded",
+                                   timeout=_BROWSER_TIMEOUT_MS)
+            status = resp.status if resp is not None else None
+            html = await page.content()
+        except BrowserUnavailable as e:
+            return FetchResult(status=FetchStatus.FETCH_ERROR, url=url, reason=str(e))
+        except Exception as e:  # playwright 异常类型随版本变化，统一按传输错误归类
+            return FetchResult(status=FetchStatus.FETCH_ERROR, url=url, reason=str(e))
+
+        if status is not None and status in _BLOCKED_CODES:
+            return FetchResult(status=FetchStatus.BLOCKED, url=url, status_code=status,
+                               reason=f"目标站拒绝访问（{status}）")
+        if status is not None and status >= 400:
+            return FetchResult(status=FetchStatus.FETCH_ERROR, url=url,
+                               status_code=status, reason=f"HTTP {status}")
+        return FetchResult(status=FetchStatus.OK, url=url, html=html, status_code=status)
