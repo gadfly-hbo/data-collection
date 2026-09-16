@@ -35,7 +35,7 @@
 - **内容**：`core/parser.py`——`trafilatura.extract(output_format="markdown")` 封装；无正文的列表页/空页返回 `None`（对应 `SKIPPED_NO_CONTENT`）。
 - **依赖**：T1.1。
 - **验收**：
-  - [ ] 单测：正文型 fixture HTML → 非空 Markdown 且剥离导航/评论；空 HTML 与无正文页面 → `None`
+  - [x] 单测：正文型 fixture HTML → 非空 Markdown 且剥离导航/评论；空 HTML 与无正文页面 → `None`（采用 `favor_precision` 高精度模式实现列表页识别）
 
 ### T1.5 LLMProvider 协议与 GeminiProvider
 - **内容**：`core/providers/base.py`（`LLMProvider` 协议 + `ExtractionResult`：item、input/output_tokens、provider、model）；`core/providers/gemini.py`（原生 `response_schema` 接受 Pydantic 模型；初始化校验 `GEMINI_API_KEY`；HTTP 429/5xx 归一化为 `TransientProviderError`）。
