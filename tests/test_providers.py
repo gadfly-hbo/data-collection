@@ -129,14 +129,19 @@ def test_missing_api_key_rejected(monkeypatch):
 # ---------- live 冒烟：按 settings.yaml 与可用 Key 自动选供应商（默认跳过） ----------
 
 def _pick_live_provider():
-    from core.providers.factory import create_provider_stack
+    """live 冒烟直连单供应商（退避语义由确定性单测覆盖），按 settings 顺序取可用者。"""
+    from core.providers.factory import create_provider
 
     provider_cfg = yaml.safe_load(
         (ROOT / "config" / "settings.yaml").read_text())["provider"]
-    try:
-        return create_provider_stack(provider_cfg)
-    except RuntimeError as e:
-        pytest.skip(str(e))
+    for name in (provider_cfg.get("primary"), provider_cfg.get("fallback")):
+        if not name:
+            continue
+        try:
+            return create_provider(name, provider_cfg.get(name) or {})
+        except (RuntimeError, ValueError):
+            continue
+    pytest.skip("无可用供应商 Key（GEMINI_API_KEY / MINIMAX_API_KEY 等）")
 
 
 @pytest.mark.live
@@ -147,7 +152,13 @@ async def test_live_smoke_any_provider():
         "并同步完成 2 亿美元 C 轮融资。公司称本季度营收同比增长 45%，"
         "新平台将首先面向制造业客户开放。"
     )
-    result = await provider.extract(sample, NewsItem, instruction="从以下正文提取行业资讯")
+    try:
+        result = await provider.extract(sample, NewsItem,
+                                        instruction="从以下正文提取行业资讯")
+    except TransientProviderError as e:
+        if "上限" in str(e) or "quota" in str(e).lower():
+            pytest.skip(f"供应商配额耗尽，待周期刷新后重试：{e}")
+        raise
     assert isinstance(result.item, NewsItem)
     assert result.item.title
     assert result.item.sentiment in ("positive", "neutral", "negative")

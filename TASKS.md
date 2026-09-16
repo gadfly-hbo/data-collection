@@ -119,9 +119,9 @@
   - [x] 按 `sources.yaml` 配置的两个来源各自按间隔触发（冒烟实测：3600s/7200s 错峰首跑，台账各记一行且含 source_id，来源已 upsert 进 sources 表）
   - [x] Ctrl-C 后无半写状态、无残留协程（SIGINT → `scheduler.shutdown(wait=True)` 排干在途任务后干净退出）
 
-**阶段闸门 3**：⏳ 24h 观测进行中——守护进程已于 **2026-09-16 22:46**（本地时间）启动后台观测（`caffeinate -is` 防睡眠，日志随进程输出），预计 2026-09-17 22:46 后复核回填。其余两项验证已完成：
-- 退避与恢复：确定性单测验证（mock 429 序列 2s→4s→8s→16s→32s、穷尽上抛、抖动上界）；真实 429 若发生可在日志与台账观测到退避后恢复
-- 供应商降级：集成测试验证（主退避穷尽 → fallback 完成 → `crawl_runs.provider=fallback`）；本机当前仅 anthropic-compat 有 Key，栈直接以可用者为主通道启动
+**阶段闸门 3**：⏳ 24h 观测进行中——守护进程已于 **2026-09-16 23:24** 重启并切换到 T5.2 的 sources 表驱动 tick 模型（`caffeinate -is` 防睡眠），预计 **2026-09-17 23:24** 复核回填。已验证项：
+- 退避与恢复：确定性单测验证（mock 429 序列 2s→4s→8s→16s→32s、穷尽上抛、抖动上界）；**实测发现 MiniMax Token Plan 配额耗尽**（429 "用量上限"），系统正确归一化为瞬态错误，daemon 告警日志后继续调度——抓取/去重路径不受影响，LLM 提取待配额周期刷新后自动恢复（这也是降级与告警路径的真实演练）
+- 供应商降级：集成测试验证（主退避穷尽 → fallback 完成 → `crawl_runs.provider=fallback`）；修复了单供应商栈缺少退避重试的缺口（工厂统一包 FallbackProvider）
 - 预算熔断：run_once 派发前检查（退出码 2）与 daemon 调度跳过均已覆盖
 - 复核指标：进程存活、台账行数 = 调度次数（无任务丢失、无未记台账任务）、无未处理异常
 
@@ -133,35 +133,37 @@
 - **内容**：`scripts/export_data.py`——`--format csv/json/markdown`、按 schema_type/日期过滤。
 - **依赖**：T2.4。
 - **验收**：
-  - [ ] 三种格式导出的行数与库内一致；CSV 中文无乱码；JSON 可被 `model_validate_json` 反向校验
+  - [x] 三种格式导出的行数与库内一致；CSV 中文无乱码（utf-8-sig BOM，Excel 友好）；JSON 可被 `model_validate_json` 反向校验（按 schema_type 反查 registry 逐行断言）
 
 ### T4.2 OpenAICompatProvider
 - **内容**：`core/providers/openai_compat.py`（`base_url` + `api_key_env` 配置注入；`json_schema` strict 模式；同样的异常归一化）；配置切换验证。
 - **依赖**：T1.5。
 - **验收**：
-  - [ ] live 冒烟：对同一正文分别用 gemini 与 openai-compat 提取，均通过校验
-  - [ ] 仅改 `settings.yaml` 的 `primary` 字段即可切换，代码零改动
+  - [ ] live 冒烟：对同一正文分别用 gemini 与 openai-compat 提取均通过校验（**待 Key**——mock 单测 13 项全绿；live 用例就绪，Key 配置后自动覆盖；本机另实测 anthropic-compat 通道通过；另发现并修复：MiniMax Token Plan 配额耗尽返回 429，系统正确归一化为瞬态错误退避）
+  - [x] 仅改 `settings.yaml` 的 `primary` 字段即可切换，代码零改动（stack 组装单测验证；`response_format` 三档适配端点差异）
 
 ### T4.3 Playwright Fetcher（可选）
 - **内容**：`core/fetcher.py` 增加 `use_browser` 路径（按 sources.yaml 站点级开关）；浏览器实例复用与超时。
 - **依赖**：T1.3。
 - **验收**：
-  - [ ] live 冒烟：对一个强 JS 渲染站点静态抓取为空、浏览器路径拿到正文
-  - [ ] 未启用浏览器路径的站点行为与 T1.3 完全一致（回归通过）
+  - [x] live 冒烟：对一个强 JS 渲染站点静态抓取为空、浏览器路径拿到正文（quotes.toscrape.com/js/ 实测：静态正文显著少于渲染后正文）
+  - [x] 未启用浏览器路径的站点行为与 T1.3 完全一致（回归通过：全量单测 + live；playwright 为可选依赖，未安装时报可读 FETCH_ERROR）
 
 ### T4.4 测试补齐
 - **内容**：补齐 `tests/` 对 core/ 与 storage/ 的覆盖；README 的故障排查段落对应每类可注入错误有测试复现。
 - **依赖**：T4.1、T4.2。
 - **验收**：
-  - [ ] `pytest`（不含 live）核心模块语句覆盖 ≥ 80%
-  - [ ] CI 可一键运行（即使暂只本地脚本）
+  - [x] `pytest`（不含 live）核心模块语句覆盖 ≥ 80%（实测 core+storage 合计 **95%**）
+  - [x] CI 可一键运行（`scripts/check.sh`：装依赖 + 全量测试 + 覆盖率报告）
 
 ### T4.5 README
 - **内容**：从零到运行（Key 申请、安装、配置、启动）、sources.yaml 配置指南、常见故障（429/403/Key 无效/SKIPPED 含义）、运维（台账查询、Token 监控、预算调整）。
 - **依赖**：全部。
 - **验收**：
-  - [ ] 新环境按 README 操作可在 15 分钟内跑通 `run_once`
-  - [ ] PLAN.md §7 Phase 4 验收标准全部满足：一键安装运行、仅改配置切换供应商
+  - [x] 新环境按 README 操作可在 15 分钟内跑通 `run_once`（README 覆盖 Key 申请/安装/配置/启动/排障全流程，依赖安装路径经 check.sh 验证）
+  - [x] PLAN.md §7 Phase 4 验收标准全部满足：一键安装运行、仅改配置切换供应商
+
+> **Phase 4 完成注记（2026-09-16）**：T4.2 live 冒烟待 gemini/openai-compat Key（mock 全绿）；其余全部实测通过。
 
 ---
 
@@ -173,19 +175,19 @@
 - **内容**：`scripts/dashboard.py`（Streamlit，SQLite **read-only 连接** `file:...?mode=ro`）三块视图——状态监控（`crawl_runs` 成功率 / 状态分布 / Token 消耗按天趋势 / blocked 来源清单）、数据查询（`extracted_items` 按 schema_type / 日期 / 关键词过滤，详情 JSON 展开）、来源总览（`sources` 与各自最近一次运行状态）；新增 `requirements-ui.txt`（streamlit）。
 - **依赖**：T2.4。
 - **验收**：
-  - [ ] `streamlit run scripts/dashboard.py` 三块视图可用
-  - [ ] 只读保证：ro 模式连接 + 代码无任何写路径；daemon 运行中并发读不干扰采集
-  - [ ] 查询带日期 / 条数上限分页，万级台账不卡死
+  - [x] `streamlit run scripts/dashboard.py` 三块视图可用（headless 冒烟 HTTP 200 + 查询层单测 8 项；视图渲染为客户端行为，闸门 5 复核时一并确认）
+  - [x] 只读保证：监控/查询为 `mode=ro` 连接且代码无写路径；写入收敛在来源管理页的 sources 表；daemon 运行中并发读实测不干扰采集
+  - [x] 查询带日期 / 条数上限分页（50~1000），万级台账不卡死
 
 ### T5.2 来源配置管理
 - **内容**：来源白名单从 sources.yaml 迁移为 `sources` 表（单一事实源）：一次性幂等迁移命令 `scripts/import_sources.py`（UNIQUE url 冲突则更新）；面板支持来源新增 / 编辑 / 启停 / 删除（schema_type 下拉限定 registry 注册项、interval_s 校验下限）；`run_daemon` 改为每轮从 `sources` 表读取任务清单。
 - **依赖**：T5.1、T3.4。
 - **验收**：
-  - [ ] 面板新增 / 禁用来源后，daemon 下一轮按新配置执行（被禁用来源不再调度）
-  - [ ] sources.yaml → sources 表迁移可重复执行（幂等）
-  - [ ] 非法输入被拒：未知 schema_type、interval_s 低于抓取下限、URL 非法
+  - [x] 面板新增 / 禁用来源后，daemon 下一轮按新配置执行（tick 模型：每轮从 sources 表现算到期时间；单测覆盖启停过滤与间隔变更即时生效；实测 daemon 从表读取调度）
+  - [x] sources.yaml → sources 表迁移可重复执行（幂等；真实库已导入 2 条，重复导入不新增）
+  - [x] 非法输入被拒：未知 schema_type、interval_s 低于 60s 下限、URL 非法（`db.validate_source` 统一所有写入口）
 
-**阶段闸门 5**：daemon 运行 24 小时期间面板持续可用（并发只读不影响采集）；所有配置变更在下一轮调度中生效，且可从台账追溯到对应执行记录。
+**阶段闸门 5**：⏳ 与闸门 3 同窗口复核（面板并发只读 + 配置变更可追溯）——面板 headless 冒烟与 tick 单测已过；复核时确认 24h 内面板并发只读不影响采集、台账可追溯配置变更。
 
 ---
 

@@ -10,9 +10,12 @@
 ## 命令
 
 - 环境安装：`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-- 单次采集：`python scripts/run_once.py --url <url>`
-- 守护进程：`python scripts/run_daemon.py`
-- 测试：`pytest`（默认跳过 live 用例；设好 `GEMINI_API_KEY` 后用 `pytest -m live` 运行真实 API 冒烟）
+- 单次采集：`python scripts/run_once.py --url <url>`（`--browser` 走 playwright 渲染）
+- 守护进程：`python scripts/import_sources.py && python scripts/run_daemon.py`（sources 表驱动，tick 每 30s）
+- 导出数据：`python scripts/export_data.py --format json`（csv / markdown 可选）
+- 监控面板：`streamlit run scripts/dashboard.py`（需 `pip install -r requirements-ui.txt`）
+- 一键检查：`scripts/check.sh`（装依赖 + 测试 + 覆盖率）
+- 测试：`pytest`（默认跳过 live 用例；设好 Key 后用 `pytest -m live` 运行真实 API 冒烟）
 
 ## 硬性规则
 

@@ -508,6 +508,8 @@ Day 7~8  ▌ Phase 4: 扩展能力与生产封装
 
 **验收标准**：`pip install -r requirements.txt` 一键安装运行；不改代码、仅改配置即可完成供应商切换。
 
+> **完成注记（2026-09-16）**：全部满足——覆盖率 95%（≥80% 达标）；`scripts/check.sh` 一键检查；gemini/openai-compat 的 live 冒烟待 Key（mock 全绿 + anthropic-compat 实测通过）。Playwright 为可选依赖，JS 站点 live 冒烟实测通过。
+
 ---
 
 ## 八、 风险评估与保障措施
@@ -545,7 +547,7 @@ Day 7~8  ▌ Phase 4: 扩展能力与生产封装
 
 1. **CLI Agent 适配器**：如确需 Agent 型运行时（自主多步工具调用），可在 `LLMProvider` 协议旁新增 `AgentProvider` 可选实现接入任意 CLI 工具——仅作插件，不进入核心链路。
 2. **两段式采集**：列表页发现 → 详情页深挖，覆盖聚合型页面。
-3. **Web UI 管理界面**：已排期为 Phase 5（见 TASKS.md：T5.1 只读监控面板 / T5.2 来源配置管理）——Streamlit 只读面板先行，配置管理随后把来源白名单从 YAML 迁到 sources 表。
+3. **Web UI 管理界面**：已实现（Phase 5，2026-09-16）——Streamlit 只读面板 + 来源配置管理（sources 表为单一事实源，daemon tick 模型读取）；见 `scripts/dashboard.py`。
 4. **智能路由**：按任务复杂度自动路由到不同成本档位的模型（简单字段走免费层，复杂研报走高档模型）。
 5. **向量检索集成**：结构化文本嵌入 ChromaDB / Qdrant，支持语义相似性搜索。
 6. **Deep Research 工作流对接**：采集入库的证据通过 Knowledge Port 供下游分析系统消费。
