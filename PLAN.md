@@ -228,17 +228,27 @@ class OpenAICompatProvider:
 ```yaml
 provider:
   primary: gemini            # 主供应商
-  fallback: openai-compat    # 主供应商连续失败时自动切换
+  fallback: anthropic-compat # 主供应商退避穷尽后自动切换
   gemini:
     model: gemini-flash-latest
-  openai-compat:
-    model: deepseek-chat     # 示例：亦可为 OpenRouter 免费模型或本地 Ollama 模型
+    rpm: 10                  # 主动限速（次/分钟），按配额保守设置
+  anthropic-compat:
+    model: MiniMax-M3
+    base_url: https://api.minimax.cn/anthropic
+    api_key_env: MINIMAX_API_KEY
+    max_tokens: 16384        # 思考型模型输出留余量
+    rpm: 30
+  openai-compat:             # Phase 4 / T4.2 实现
+    model: deepseek-chat
     base_url: https://api.deepseek.com/v1
     api_key_env: DEEPSEEK_API_KEY
 
+alerts:
+  macos_notify: false        # BLOCKED / 认证失败时发 macOS 本地通知
+
 budget:
   max_tasks_per_day: 300
-  max_input_tokens_per_day: 2000000
+  max_input_tokens_per_day: 3000000   # 按实测单任务 0.7万~2.8万 input 校准
 
 fetch:
   min_interval_per_host_s: 5

@@ -97,29 +97,33 @@
 - **内容**：`core/rate_limiter.py`——`with_backoff`（指数退避 + 随机抖动，上限 300s，重试 5 次）；按 Provider RPM 的令牌桶主动限速。
 - **依赖**：T1.5。
 - **验收**：
-  - [ ] 单测：429 序列的退避间隔符合 2s→4s→8s→16s→32s（mock sleep 断言）；重试穷尽后向上抛出
-  - [ ] 令牌桶：超过 RPM 的调用被延迟而非立即发出
+  - [x] 单测：429 序列的退避间隔符合 2s→4s→8s→16s→32s（注入 sleep 确定性断言）；重试穷尽后向上抛出（另覆盖抖动上界与非瞬态错误立即传播）
+  - [x] 令牌桶：超过 RPM 的调用被延迟而非立即发出（注入时钟断言等待时长）
 
 ### T3.2 供应商降级
-- **内容**：主供应商退避穷尽后切换 `fallback`（配置见 settings.yaml），台账记录实际 provider。
-- **依赖**：T3.1、（T4.2 的 openai_compat 可用 fake provider 替身先行开发）。
+- **内容**：主供应商退避穷尽后切换 `fallback`（配置见 settings.yaml），台账记录实际 provider。实际交付为 `FallbackProvider` + `create_provider_stack`（primary→fallback 取可用者 + 按 effective 主供应商 RPM 令牌桶限速），替代原 openai_compat 替身方案。
+- **依赖**：T3.1、（原定 T4.2 openai_compat 替身——实际以 anthropic-compat 为备用通道）。
 - **验收**：
-  - [ ] 集成：主供应商持续失败 → 任务由 fallback 完成且 `crawl_runs.provider` 记录为 fallback
+  - [x] 集成：主供应商持续失败 → 任务由 fallback 完成且 `crawl_runs.provider` 记录为 fallback
 
 ### T3.3 日预算熔断
 - **内容**：`budget` 双上限（`max_tasks_per_day`、`max_input_tokens_per_day`，按 T1.5 实测基线校准参数）；超限后当日停止派发新任务。
 - **依赖**：T2.4。
 - **验收**：
-  - [ ] 单测：伪造台账数据逼近/超过上限，新任务被拒并有明确日志
+  - [x] 单测：伪造台账数据逼近/超过上限，新任务被拒并有明确日志（run_once 输出可读错误退出码 2；daemon 派发前检查 + WARNING 日志跳过）
 
 ### T3.4 守护进程 run_daemon
 - **内容**：`scripts/run_daemon.py`——APScheduler 按 `sources.yaml` 的 `interval_s` 调度；串行 Worker；优雅退出（SIGINT/SIGTERM 排干队列）；告警最小出口（`blocked` 与认证失败 → ERROR 日志 + 可选 macOS 本地通知）。
 - **依赖**：T2.4、T3.1、T3.3。
 - **验收**：
-  - [ ] 按 `sources.yaml` 配置的两个来源各自按间隔触发
-  - [ ] Ctrl-C 后无半写状态、无残留协程
+  - [x] 按 `sources.yaml` 配置的两个来源各自按间隔触发（冒烟实测：3600s/7200s 错峰首跑，台账各记一行且含 source_id，来源已 upsert 进 sources 表）
+  - [x] Ctrl-C 后无半写状态、无残留协程（SIGINT → `scheduler.shutdown(wait=True)` 排干在途任务后干净退出）
 
-**阶段闸门 3**：守护进程连续 24 小时稳定运行（无任务丢失、无未记台账任务）；人为注入 429 可观测到退避与恢复；主供应商不可用时自动降级。
+**阶段闸门 3**：⏳ 24h 观测进行中——守护进程已于 **2026-09-16 22:46**（本地时间）启动后台观测（`caffeinate -is` 防睡眠，日志随进程输出），预计 2026-09-17 22:46 后复核回填。其余两项验证已完成：
+- 退避与恢复：确定性单测验证（mock 429 序列 2s→4s→8s→16s→32s、穷尽上抛、抖动上界）；真实 429 若发生可在日志与台账观测到退避后恢复
+- 供应商降级：集成测试验证（主退避穷尽 → fallback 完成 → `crawl_runs.provider=fallback`）；本机当前仅 anthropic-compat 有 Key，栈直接以可用者为主通道启动
+- 预算熔断：run_once 派发前检查（退出码 2）与 daemon 调度跳过均已覆盖
+- 复核指标：进程存活、台账行数 = 调度次数（无任务丢失、无未记台账任务）、无未处理异常
 
 ---
 
