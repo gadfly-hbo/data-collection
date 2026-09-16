@@ -21,7 +21,7 @@ import yaml  # noqa: E402
 from core.dedup import DedupGate  # noqa: E402
 from core.fetcher import Fetcher  # noqa: E402
 from core.pipeline import Pipeline, TaskSpec  # noqa: E402
-from core.providers.factory import resolve_provider  # noqa: E402
+from core.providers.factory import create_provider_stack  # noqa: E402
 from models.registry import get_schema  # noqa: E402
 from storage.db import Database  # noqa: E402
 from storage.ledger import RunLedger  # noqa: E402
@@ -45,7 +45,7 @@ async def _run(args: argparse.Namespace) -> int:
     settings = _load_settings(args.config)
     fetch_cfg = settings.get("fetch", {})
     try:
-        provider = resolve_provider(settings["provider"])
+        provider = create_provider_stack(settings["provider"])
         schema = get_schema(args.schema)
     except (RuntimeError, KeyError) as e:
         _emit({"error": str(e)})

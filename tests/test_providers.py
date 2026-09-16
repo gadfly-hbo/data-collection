@@ -129,12 +129,12 @@ def test_missing_api_key_rejected(monkeypatch):
 # ---------- live 冒烟：按 settings.yaml 与可用 Key 自动选供应商（默认跳过） ----------
 
 def _pick_live_provider():
-    from core.providers.factory import resolve_provider
+    from core.providers.factory import create_provider_stack
 
     provider_cfg = yaml.safe_load(
         (ROOT / "config" / "settings.yaml").read_text())["provider"]
     try:
-        return resolve_provider(provider_cfg)
+        return create_provider_stack(provider_cfg)
     except RuntimeError as e:
         pytest.skip(str(e))
 

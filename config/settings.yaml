@@ -6,11 +6,13 @@ provider:
   gemini:
     # 模型名以官方文档当前稳定版为准
     model: gemini-flash-latest
+    rpm: 10                    # 主动限速（次/分钟）：按免费层配额保守设置
   anthropic-compat:            # Anthropic 协议兼容端点：MiniMax / Anthropic 官方等
     model: MiniMax-M3
     base_url: https://api.minimax.cn/anthropic
     api_key_env: MINIMAX_API_KEY
     max_tokens: 16384          # M3 为思考型模型，输出含思考 token，需留余量
+    rpm: 30                    # 主动限速（次/分钟），按实际配额调整
   openai-compat:               # OpenAI 协议端点（Phase 4 / T4.2 实现）
     model: deepseek-chat       # 亦可为 OpenRouter 免费模型或本地 Ollama 模型
     base_url: https://api.deepseek.com/v1
