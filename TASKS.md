@@ -64,29 +64,30 @@
 - **内容**：`storage/raw_store.py`——SHA-256 内容哈希命名写盘（`data/raw/{sha256}.md`）、读取、存在性查询。
 - **依赖**：T1.6。
 - **验收**：
-  - [ ] 单测：同内容两写只落一个文件；读取内容与写入一致；哈希与文件名一致
+  - [x] 单测：同内容两写只落一个文件；读取内容与写入一致；哈希与文件名一致
 
 ### T2.2 SQLite 三表 db
 - **内容**：`storage/db.py`——按 PLAN.md §5.5 建 `sources` / `crawl_runs` / `extracted_items` 三表 + `schema_version` 元数据表；各表写入接口；单例连接。
 - **依赖**：T1.1。
 - **验收**：
-  - [ ] 建库幂等（重复初始化不报错、不丢数据）
-  - [ ] 写入接口的单测覆盖三表（内存 SQLite）
+  - [x] 建库幂等（重复初始化不报错、不丢数据）
+  - [x] 写入接口的单测覆盖三表（内存 SQLite，含外键强制、dedup_hash 唯一忽略、未来版本拒绝打开）
+- **补充交付**：`core/status.py`（RunStatus 独立模块，避免 dedup→pipeline 循环导入）；PLAN §5.5 修订——crawl_runs 补 `url` 列（ad-hoc 任务不经过 sources，url 必随行）
 
 ### T2.3 去重闸门 dedup
 - **内容**：`core/dedup.py`——URL + 内容哈希联合判断；接入 pipeline（位于快照之后、LLM 之前）；命中记 `SKIPPED_UNCHANGED`。
 - **依赖**：T2.1、T2.2。
 - **验收**：
-  - [ ] 单测：同 URL 同哈希命中；同 URL 新哈希不命中；不同 URL 同哈希不互相干扰
-  - [ ] 集成：重复执行同一 URL，第二次走 `SKIPPED_UNCHANGED` 且 **0 次 LLM 调用**（以调用计数断言）
+  - [x] 单测：同 URL 同哈希命中；同 URL 新哈希不命中；不同 URL 同哈希不互相干扰（另覆盖：此前失败记录不命中——内容未变也应重试提取）
+  - [x] 集成：重复执行同一 URL，第二次走 `SKIPPED_UNCHANGED` 且 **0 次 LLM 调用**（以调用计数断言；注：闸门依赖台账中的 SUCCESS 行，T2.4 接线后闭环）
 
 ### T2.4 台账全量接入
 - **内容**：pipeline 所有终态（含 `FETCH_ERROR / BLOCKED / SKIPPED_UNCHANGED / SKIPPED_NO_CONTENT / SCHEMA_ERROR`）写入 `crawl_runs`，成功路径写 `extracted_items`。
 - **依赖**：T2.2、T2.3。
 - **验收**：
-  - [ ] 六种状态各触发一次的集成测试，`crawl_runs` 各有一行且字段完整（provider、tokens、duration_ms）
+  - [x] 六种状态各触发一次的集成测试，`crawl_runs` 各有一行且字段完整（provider、tokens、duration_ms；SUCCESS 额外写 extracted_items 且内容去重哈希排除 scraped_at/source_url 易变字段）
 
-**阶段闸门 2**：5 个不同 URL 批量采集全部正确落库；重复执行不产生重复行、不产生重复 LLM 调用。
+**阶段闸门 2**：✅ 已通过（2026-09-16）——5 个 Wikipedia 词条真实采集全部 SUCCESS 落库（crawl_runs 5 行、extracted_items 5 行、快照 5 个）；复跑 Web_scraping → `SKIPPED_UNCHANGED`、0 token、raw_hash 与首跑一致、无重复行无重复 LLM 调用。实测 input tokens 随页面体量 6.6k~28k 浮动（Machine_learning 词条最大）。
 
 ---
 
