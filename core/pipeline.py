@@ -12,10 +12,12 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, ValidationError
 
+from core.dedup import DedupGate
 from core.fetcher import FetchStatus, Fetcher
 from core.parser import extract_markdown
 from core.providers.base import LLMProvider
 from core.status import RunStatus  # noqa: F401  再导出，兼容既有导入路径
+from storage.raw_store import RawStore
 
 _MAX_ERROR_LEN = 160
 
@@ -58,11 +60,20 @@ class RunOutcome:
 
 
 class Pipeline:
-    """绑定一对 Fetcher 与 LLMProvider，逐任务执行采集流水线。"""
+    """绑定一对 Fetcher 与 LLMProvider，逐任务执行采集流水线。
 
-    def __init__(self, fetcher: Fetcher, provider: LLMProvider):
+    raw_store / dedup 为可选组件（None = 关闭该环节，供单测使用）；
+    生产入口（run_once / run_daemon）必须全部接通——先落快照、过去重
+    闸门、再花 LLM 调用的顺序不可颠倒（AGENTS.md 约定）。
+    """
+
+    def __init__(self, fetcher: Fetcher, provider: LLMProvider,
+                 raw_store: RawStore | None = None,
+                 dedup: DedupGate | None = None):
         self.fetcher = fetcher
         self.provider = provider
+        self.raw_store = raw_store
+        self.dedup = dedup
 
     async def run(self, task: TaskSpec) -> RunOutcome:
         start = time.monotonic()
@@ -83,7 +94,14 @@ class Pipeline:
         markdown = extract_markdown(fetched.html or "", url=fetched.url)
         if not markdown:
             return RunOutcome(RunStatus.SKIPPED_NO_CONTENT, task.url)
-        # Phase 2 桩：raw_hash = raw_store.save(markdown)；dedup 命中 → SKIPPED_UNCHANGED
+
+        # 先落快照、过去重闸门，再花 LLM 调用（顺序不可颠倒）
+        raw_hash: str | None = None
+        if self.raw_store is not None:
+            raw_hash = self.raw_store.save(markdown)
+            if self.dedup is not None and self.dedup.seen(task.url, raw_hash):
+                return RunOutcome(RunStatus.SKIPPED_UNCHANGED, task.url,
+                                  raw_hash=raw_hash)
 
         try:
             result = await self._extract_with_retry(markdown, task.schema,
@@ -95,7 +113,7 @@ class Pipeline:
 
         item = _stamp(result.item, fetched.url)
         return RunOutcome(
-            RunStatus.SUCCESS, task.url, item=item,
+            RunStatus.SUCCESS, task.url, item=item, raw_hash=raw_hash,
             input_tokens=result.input_tokens, output_tokens=result.output_tokens,
             provider=result.provider, model=result.model,
         )

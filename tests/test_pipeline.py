@@ -141,3 +141,69 @@ async def test_transient_provider_error_propagates():
         with pytest.raises(TransientProviderError):
             await Pipeline(f, provider).run(
                 TaskSpec(url="https://a.example/1", schema=NewsItem))
+
+
+# ---------- T2.3：快照 + 去重闸门集成 ----------
+
+def _wired_pipeline(provider, tmp_path, html_by_call: list[str]):
+    """构造接通快照与去重的 Pipeline；html_by_call 依次给出每次页面请求的返回内容。"""
+    served = {"i": 0}
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("/robots.txt"):
+            return httpx.Response(404)
+        html = html_by_call[min(served["i"], len(html_by_call) - 1)]
+        served["i"] += 1
+        return httpx.Response(200, text=html)
+
+    from core.dedup import DedupGate
+    from storage.db import Database
+    from storage.raw_store import RawStore
+
+    fetcher = Fetcher("TestBot/1.0", min_interval_per_host_s=0,
+                      transport=httpx.MockTransport(handle))
+    db = Database(":memory:")
+    return Pipeline(fetcher, provider, raw_store=RawStore(tmp_path / "raw"),
+                    dedup=DedupGate(db)), db
+
+
+async def test_second_identical_run_skips_with_zero_llm_calls(tmp_path):
+    provider = FakeProvider([_result()])
+    pipeline, _ = _wired_pipeline(provider, tmp_path, [ARTICLE_HTML])
+    task = TaskSpec(url="https://a.example/story", schema=NewsItem)
+
+    first = await pipeline.run(task)
+    second = await pipeline.run(task)
+
+    assert first.status is RunStatus.SUCCESS
+    assert first.raw_hash
+    assert second.status is RunStatus.SKIPPED_UNCHANGED
+    assert second.raw_hash == first.raw_hash
+    assert len(provider.calls) == 1  # 重复执行：0 次重复 LLM 调用
+
+
+async def test_same_url_new_content_re_extracts(tmp_path):
+    provider = FakeProvider([_result()])
+    pipeline, _ = _wired_pipeline(provider, tmp_path,
+                                  [ARTICLE_HTML, ARTICLE_HTML + "<p>新增段落，内容有更新</p>"])
+    task = TaskSpec(url="https://a.example/story", schema=NewsItem)
+
+    first = await pipeline.run(task)
+    second = await pipeline.run(task)
+
+    assert first.status is RunStatus.SUCCESS
+    assert second.status is RunStatus.SUCCESS  # 内容有更新 → 不命中去重，重新提取
+    assert second.raw_hash != first.raw_hash
+    assert len(provider.calls) == 2
+
+
+async def test_same_content_different_urls_both_extract(tmp_path):
+    provider = FakeProvider([_result()])
+    pipeline, _ = _wired_pipeline(provider, tmp_path, [ARTICLE_HTML])
+    first = await pipeline.run(TaskSpec(url="https://a.example/story", schema=NewsItem))
+    second = await pipeline.run(TaskSpec(url="https://b.example/mirror", schema=NewsItem))
+
+    assert first.status is RunStatus.SUCCESS
+    assert second.status is RunStatus.SUCCESS  # 不同 URL 的同内容互不干扰
+    assert len(provider.calls) == 2
+
