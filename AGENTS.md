@@ -12,6 +12,7 @@
 - 环境安装：`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
 - 单次采集：`python scripts/run_once.py --url <url>`（`--browser` 走 playwright 渲染）
 - 守护进程：`python scripts/import_sources.py && python scripts/run_daemon.py`（sources 表驱动，tick 每 30s）
+- Web 控制台：`python scripts/webapp.py`（独立 HTML 前端，内置调度，自动开浏览器；**与 run_daemon 二选一**）
 - 导出数据：`python scripts/export_data.py --format json`（csv / markdown 可选）
 - 监控面板：`streamlit run scripts/dashboard.py`（需 `pip install -r requirements-ui.txt`）
 - 一键检查：`scripts/check.sh`（装依赖 + 测试 + 覆盖率）

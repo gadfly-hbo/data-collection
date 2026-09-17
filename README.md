@@ -62,10 +62,15 @@ python scripts/run_daemon.py         # 守护进程：每 30s 扫描来源表，
 ### 5. 查看数据
 
 ```bash
-python scripts/export_data.py --format json --since 2026-09-16   # 导出 JSON
+python scripts/webapp.py            # Web 控制台（推荐，自动打开浏览器）
+python scripts/export_data.py --format json --since 2026-09-16   # 命令行导出 JSON
 python scripts/export_data.py --format csv --out out.csv         # 导出 CSV（Excel 友好）
-streamlit run scripts/dashboard.py                               # Web 监控面板
+streamlit run scripts/dashboard.py                               # Streamlit 面板
 ```
+
+**Web 控制台**（`http://localhost:8500`）是面向非技术用户的入口：粘贴网址点击「执行采集」、在「来源管理」增删改采集源（下一个调度周期生效）、「运行记录」与「数据浏览」查看台账和结构化结果、「导出」下载 CSV/JSON/Markdown。macOS 上也可以直接**双击项目里的 `启动控制台.command`**（自动装依赖并打开浏览器）。
+
+> 单写约束：`webapp.py`（默认内置定时调度）与 `run_daemon.py` 请**二选一**运行；两者同时跑属违规。`--no-scheduler` 可关闭 webapp 内的调度只做手动触发与查看。
 
 ## 配置指南
 
@@ -106,6 +111,8 @@ SELECT * FROM crawl_runs WHERE url LIKE '%en.wikipedia.org%' ORDER BY id DESC;
 - 原始正文快照：`data/raw/{sha256}.md`（内容寻址，天然去重）
 - 预算调整：改 `settings.yaml` 的 `budget` 后重启守护进程
 - 写入约定：SQLite 单 Worker 串行写；面板读路径为 `mode=ro` 只读连接，与采集并发不冲突
+
+**Web 控制台** 的界面代码在 `web/`（原生 HTML/JS/CSS，无构建步骤），后端 API 在 `scripts/webapp.py`（FastAPI）。若要定制界面，直接改这三个文件即可，刷新浏览器生效。
 
 ## 常见故障排查
 

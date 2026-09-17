@@ -189,6 +189,15 @@
 
 **阶段闸门 5**：⏳ 与闸门 3 同窗口复核（面板并发只读 + 配置变更可追溯）——面板 headless 冒烟与 tick 单测已过；复核时确认 24h 内面板并发只读不影响采集、台账可追溯配置变更。
 
+### T5.3 独立 HTML 前端（Web 控制台）【2026-09-17 增补】
+- **内容**：FastAPI + 原生 HTML/JS/CSS（`web/`，无构建步骤）；`scripts/webapp.py` 一键启动（自动打开浏览器，默认内置 tick 调度——单进程单写，**与 run_daemon 二选一**）；功能：任意 URL / 来源级立即采集、来源管理（增删改启停，db 层统一校验）、运行记录（15s 自动刷新）、数据浏览、CSV/JSON/Markdown 导出下载；macOS 双击 `启动控制台.command` 一键启动（自动装依赖）
+- **依赖**：T5.2。
+- **验收**：
+  - [x] `python scripts/webapp.py` 一键启动并自动打开浏览器；`启动控制台.command` 双击同效
+  - [x] 非技术人员可经前端完成：新增来源 → 点击采集 → 查看结构化结果与运行台账
+  - [x] API 测试 12 项（TestClient + FakePipeline 注入，不触网）；真实冒烟 index / summary / sources / export 均 200
+- **注记**：`run_source` 增加 outcome 返回值（webapp 复用）；`db.Database` 连接 `check_same_thread=False`（FastAPI 线程池跨线程共用单连接，依赖 SQLite serialized 模式 + 单写串行约定）；budget 测试日期改动态生成（修复 UTC 跨天即失效的潜在缺陷）
+
 ---
 
 ## 代码审核修正（2026-09-17）
