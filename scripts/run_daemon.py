@@ -111,6 +111,7 @@ async def run_source(source, ctx: DaemonContext) -> None:
         else:
             logger.warning("[%s] %s error=%s", outcome.status.value, url,
                            outcome.error)
+        return outcome  # Web 控制台复用本函数时取终态；跳过/异常路径返回 None
 
 
 async def run_tick(ctx: DaemonContext, db: Database) -> None:

@@ -87,7 +87,10 @@ class Database:
         path = str(path)
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(path)
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        # check_same_thread=False：单连接全进程复用（本模块契约）。跨线程安全
+        # 依赖 SQLite serialized 编译模式（各语句原子）+ 本项目单写串行约定，
+        # Web 控制台的同步端点在 FastAPI 线程池中执行时同样成立。
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA journal_mode = WAL")  # 面板只读连接与采集写并发

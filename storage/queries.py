@@ -64,6 +64,13 @@ def list_sources_with_last_run(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "FROM sources s ORDER BY s.id").fetchall()
 
 
+def recent_runs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, url, status, provider, model, input_tokens, output_tokens, "
+        "duration_ms, error_msg, created_at FROM crawl_runs "
+        "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
 def query_items(conn: sqlite3.Connection, *, schema_type: str | None = None,
                 keyword: str | None = None, since: str | None = None,
                 until: str | None = None, limit: int = 200,

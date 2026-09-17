@@ -1,10 +1,14 @@
 """T3.3：日预算熔断验收测试。"""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from core.budget import BudgetExhausted, BudgetGuard
 from storage.db import Database
 
-TODAY = "2026-09-16"
+# 不写死日期：UTC 日期翻转（午夜跨天）时测试不得失效
+TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+YESTERDAY = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def _guard(db, *, max_tasks=3, max_tokens=1000, today=TODAY):
@@ -66,7 +70,7 @@ def test_other_days_not_counted():
     db = Database(":memory:")
     guard = _guard(db, max_tasks=2)
     _billable_run(db, "https://a.example/1",
-                  created_at="2026-09-01 10:00:00")  # 昨天的量不占今天预算
+                  created_at=f"{YESTERDAY} 10:00:00")  # 昨天的量不占今天预算
     _billable_run(db, "https://a.example/2",
                   created_at=f"{TODAY} 09:00:00")
     tasks, tokens = guard.check()

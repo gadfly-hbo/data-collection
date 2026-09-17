@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>采集控制台</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>🕸️ 采集控制台</h1>
+    <nav id="nav">
+      <button data-tab="run" class="active">采集执行</button>
+      <button data-tab="sources">来源管理</button>
+      <button data-tab="runs">运行记录</button>
+      <button data-tab="data">数据浏览</button>
+      <button data-tab="export">导出</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 采集执行 -->
+    <section id="tab-run" class="tab active">
+      <div class="card">
+        <h2>立即采集</h2>
+        <p class="hint">输入任意公开网页地址，点击执行；也可以到「来源管理」对已配置的来源一键采集。</p>
+        <form id="run-form">
+          <input id="run-url" type="text" placeholder="https://example.com/article" required>
+          <select id="run-schema"></select>
+          <label class="chk"><input id="run-browser" type="checkbox"> 浏览器渲染（JS 站点）</label>
+          <button type="submit" id="run-btn">▶ 执行采集</button>
+        </form>
+        <div id="run-result" class="result hidden"></div>
+      </div>
+      <div class="card">
+        <h2>今日概览</h2>
+        <div id="summary" class="metrics">加载中…</div>
+        <div id="blocked" class="hint"></div>
+      </div>
+    </section>
+
+    <!-- 来源管理 -->
+    <section id="tab-sources" class="tab">
+      <div class="card">
+        <h2>采集来源</h2>
+        <table id="sources-table" class="data">
+          <thead><tr>
+            <th>ID</th><th>名称</th><th>URL</th><th>Schema</th><th>间隔</th>
+            <th>状态</th><th>最近结果</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>新增 / 更新来源</h2>
+        <form id="source-form">
+          <input id="src-url" type="text" placeholder="URL（已存在则更新）" required>
+          <input id="src-name" type="text" placeholder="名称（可选）">
+          <select id="src-schema"></select>
+          <input id="src-interval" type="number" value="3600" min="60" step="60" title="采集间隔（秒）">
+          <label class="chk"><input id="src-browser" type="checkbox"> 浏览器渲染</label>
+          <label class="chk"><input id="src-enabled" type="checkbox" checked> 启用</label>
+          <button type="submit">保存</button>
+        </form>
+        <p class="hint">间隔下限 60 秒；JS 渲染站点勾选「浏览器渲染」（需已安装 playwright）。</p>
+      </div>
+    </section>
+
+    <!-- 运行记录 -->
+    <section id="tab-runs" class="tab">
+      <div class="card">
+        <h2>运行记录 <button id="runs-refresh" class="mini">刷新</button>
+          <label class="chk"><input id="runs-auto" type="checkbox" checked> 每 15 秒自动刷新</label></h2>
+        <table id="runs-table" class="data">
+          <thead><tr>
+            <th>#</th><th>时间</th><th>状态</th><th>URL</th>
+            <th>供应商</th><th>Token(in/out)</th><th>耗时</th><th>错误</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 数据浏览 -->
+    <section id="tab-data" class="tab">
+      <div class="card">
+        <h2>结构化数据</h2>
+        <form id="data-form">
+          <select id="data-schema"><option value="">（全部）</option></select>
+          <input id="data-keyword" type="text" placeholder="关键词（内容 / URL）">
+          <button type="submit">查询</button>
+        </form>
+        <p class="hint" id="data-total"></p>
+        <div id="data-list"></div>
+      </div>
+    </section>
+
+    <!-- 导出 -->
+    <section id="tab-export" class="tab">
+      <div class="card">
+        <h2>导出数据</h2>
+        <p class="hint">按 Schema 与日期过滤后下载（与「数据浏览」共用过滤条件）。</p>
+        <form id="export-form">
+          <select id="export-schema"><option value="">（全部）</option></select>
+          <input id="export-since" type="date"> 至 <input id="export-until" type="date">
+          <button type="button" data-fmt="csv">下载 CSV</button>
+          <button type="button" data-fmt="json">下载 JSON</button>
+          <button type="button" data-fmt="markdown">下载 Markdown</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

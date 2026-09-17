@@ -1,2 +1,4 @@
-# Web 监控面板依赖（可选）：pip install -r requirements-ui.txt
+# Web 界面依赖（可选）：pip install -r requirements-ui.txt
 streamlit>=1.40
+fastapi>=0.115
+uvicorn>=0.30
