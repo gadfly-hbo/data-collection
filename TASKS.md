@@ -337,7 +337,7 @@
 - **验收**：[x] 两模板注册且 validateTemplate 通过（skeleton 参数化：仅维度/prompt 差异，引擎与执行器零改动）；[ ] live 各跑通一份报告（商圈报告验证通过后按同流程发起）。
 ### T9.5 研究 job 生命周期与预算
 - **内容**：`ResearchExecutor`（快照续跑、report artifact、paused 态）+ webapp 端点（templates/create 待确认/confirm/resume/jobs 详情）+ daemon 注册。
-- **验收**：[x] 确认前零消耗（创建即 enabled=0，未确认不进调度——端点测试断言）；[x] 预算超限→paused+快照（引擎测试）；[x] 端点 5 组 + executor 4 项测试。
+- **验收**：[x] 确认前零消耗（创建即 enabled=0，未确认不进调度——端点测试断言）；[x] 预算超限→paused+快照（引擎测试）；[x] 端点 5 组 + executor 4 项测试；[x] T9.7：预检真机 ok（web_search 枚举成功）、429 在预检后正确零消耗暂停（job#5 run28 实证）、质量门单测覆盖达标/证据不足/跑题三分支；[ ] 一份通过终检的完整报告 live 产出（受 MiniMax Token Plan 配额窗口制约——job#5 已确认排队，配额恢复后续跑即产；恢复后跑 `POST /api/research/jobs/5/resume` 或重启 daemon）。
 
 **阶段闸门 9**：⚠️ 机制通过、内容质量待修（2026-09-18）——
 - 机制全链路实证 ✅：job#4 创建→确认（enabled:0 守门）→首跑在 research 节点被溯源防线拦截（真实拒绝编造）→ 修复工具证据收集后续跑 → 5 节点全 done（validate 判 NEED_FIX、fix 按门控执行）→ report artifact 8693 字，累计 109.7k tokens；断点续跑、暂停快照、预算、门控在生产路径全部走过。
