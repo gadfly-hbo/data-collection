@@ -68,7 +68,7 @@ python scripts/export_data.py --format csv --out out.csv         # 导出 CSV（
 streamlit run scripts/dashboard.py                               # Streamlit 面板
 ```
 
-**Web 控制台**（`http://localhost:8500`）是面向非技术用户的入口：粘贴网址点击「执行采集」、在「来源管理」增删改采集源（下一个调度周期生效）、「运行记录」与「数据浏览」查看台账和结构化结果、「导出」下载 CSV/JSON/Markdown。macOS 上也可以直接**双击项目里的 `启动控制台.command`**（自动装依赖并打开浏览器）。
+**Web 控制台**（`http://localhost:8500`）面向非技术用户，打开默认进入**对话助手**：用自然语言描述需求（"帮我每天早上盯一下 XX 首页的热点"），助手会追问补齐信息并整理成采集计划卡片，**经你确认后**才会创建来源并执行。其余页面：「采集执行」直接对已知网址单次采集；「来源管理」增删改启停；「运行记录」查看台账；「数据浏览」与「导出」查看和下载结构化结果。macOS 上也可以直接**双击项目里的 `启动控制台.command`**（自动装依赖并打开浏览器）。界面遵循 JuanerAI Prism 棱镜设计规范。
 
 > 单写约束：`webapp.py`（默认内置定时调度）与 `run_daemon.py` 请**二选一**运行；两者同时跑属违规。`--no-scheduler` 可关闭 webapp 内的调度只做手动触发与查看。
 

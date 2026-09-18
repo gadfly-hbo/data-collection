@@ -197,6 +197,16 @@
   - [x] API 测试 12 项（TestClient + FakePipeline 注入，不触网）；真实冒烟 index / summary / sources / export 均 200
 - **注记**：`run_source` 增加 outcome 返回值（webapp 复用）；`db.Database` 连接 `check_same_thread=False`（FastAPI 线程池跨线程共用单连接，依赖 SQLite serialized 模式 + 单写串行约定）；budget 测试日期改动态生成（修复 UTC 跨天即失效的潜在缺陷）
 
+### T5.4 对话式需求收集 + Prism 规范落地【2026-09-18 增补】
+- **内容**：对话助手成为默认首页——用户自然语言描述需求 → `core/planner.py`（复用 Provider 栈，限速/退避/降级不变）追问补齐关键信息 → 结构化计划卡片（`models/plan_schema.py`）→ **用户确认后才创建来源并执行**；整体 UI 按 Prism 棱镜规范重构（240px 侧边栏外壳、墨青主色、状态徽标圆点+中文标签、每页固定结构：页头说明→提示条→主工作区→页脚边界文案）；新增 `/api/chat`、`/api/schemas`（Schema 注册表下发，消除前端硬编码）
+- **依赖**：T5.3。
+- **验收**：
+  - [x] 对话闭环：描述需求 → 助手追问 / 出计划卡 → 确认创建并立即执行（计划卡片是唯一执行入口，无"自动执行"路径）
+  - [x] 信息不齐时助手只问一个最关键的问题；URL 缺失不编造；schema_type 非法值兜底到注册表首项
+  - [x] 真实冒烟（MiniMax）：助手正确识别 HN 首页为列表页、指出需浏览器渲染、主动追问确认 URL，plan=null
+  - [x] UI 符合 Prism：侧边栏外壳、墨青主色仅用于主操作/选中态、状态徽标配文字、页脚边界文案（执行需确认、数据仅存本机）
+  - [x] 单测：planner 3 项 + chat/schemas API 6 项（FakeProvider 注入，覆盖 503/422/兜底分支）
+
 ---
 
 ## 代码审核修正（2026-09-17）
