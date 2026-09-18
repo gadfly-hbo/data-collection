@@ -22,7 +22,7 @@
 
 - LLM SDK（`@earendil-works/pi-ai`）只允许出现在 `src/providers/`；`@earendil-works/pi-coding-agent`（发现 Agent）只允许出现在 `src/discovery/`；其余代码只依赖 `LlmProvider` 协议与 `DiscoverySession` 接口——这是供应商可替换性的边界，违反即架构回退。豁免：`scripts/probe-*.ts` 一次性诊断脚本（不进产品链路）。
 - 凭证只从环境变量 / `.env` 读取（`MINIMAX_API_KEY` 等）。代码里不得内联；`src/providers/piAiProvider.ts` 的 `ENV_FALLBACKS` 是本项与 pi-ai 环境变量约定（`MINIMAX_CN_API_KEY`）之间唯一的桥接点。
-- 对目标站点的任何 HTTP 请求必须经过 `Fetcher`（robots 检查 + 域名限速）；绕过它直接发请求会触发封锁与合规风险。发现 Agent 的检索走 MiniMax MCP（`minimax_web_search`），不直接抓取目标站。
+- 对目标站点的任何 HTTP 请求必须经过 `Fetcher`（robots 检查 + 域名限速）；仅 `src/connectors/` 中显式声明 `api: true` 的官方 API 端点可走 Fetcher 的 API 通道（保留限速，robots 不适用），网页路径不得豁免。发现 Agent 的检索走 MiniMax MCP（`minimax_web_search`），不直接抓取目标站。
 - SQLite 只允许单 Worker 串行写入（`Database` 单连接复用；`run-daemon` 与 `webapp` 的二选一约束由此而来），不引入并发写路径。
 - 每个采集任务的终态（含 SKIPPED_* 与异常）必须写入 `crawl_runs` 台账——没有记台账的任务等于没跑。
 

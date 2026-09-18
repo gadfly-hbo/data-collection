@@ -226,3 +226,67 @@ describe("webapp：Web 控制台 API", () => {
     db2.close();
   });
 });
+
+describe("webapp：connector 端点", () => {
+  it("GET /api/connectors 列出注册表（参数含选项与约束）", async () => {
+    const db = new Database(":memory:");
+    await withApp(db, {}, async (base) => {
+      const list = await (await fetch(`${base}/api/connectors`)).json();
+      const weather = list.find((c: { id: string }) => c.id === "weather");
+      expect(weather.name).toBe("天气数据");
+      expect(weather.api).toBe(true);
+      expect(weather.min_interval_s).toBe(3600);
+      expect(weather.params.city.options).toContain("深圳");
+    });
+    db.close();
+  });
+
+  it("POST /api/jobs 创建 custom 任务；非法 connector/参数/间隔拒绝", async () => {
+    const db = new Database(":memory:");
+    await withApp(db, {}, async (base) => {
+      const ok = await fetch(`${base}/api/jobs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connector: "weather", params: { city: "深圳" }, interval_s: 3600 }),
+      });
+      expect(ok.status).toBe(200);
+      const body = await ok.json();
+      expect(body.ok).toBe(true);
+      expect(db.getSourceJob).toBeTruthy();
+      const job = db.getJob(body.id) as { type: string; payload: string };
+      expect(job.type).toBe("custom");
+      expect(JSON.parse(job.payload).connector).toBe("weather");
+
+      const badConn = await fetch(`${base}/api/jobs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connector: "nope" }) });
+      expect(badConn.status).toBe(400);
+      const badCity = await fetch(`${base}/api/jobs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connector: "weather", params: { city: "火星" } }) });
+      expect(badCity.status).toBe(400);
+      const badIv = await fetch(`${base}/api/jobs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connector: "weather", params: { city: "深圳" }, interval_s: 60 }) });
+      expect(badIv.status).toBe(400);
+    });
+    db.close();
+  });
+
+  it("GET /api/dataset/:jobId 返回最新批次行；DELETE /api/jobs 停用", async () => {
+    const db = new Database(":memory:");
+    const jobId = db.insertJob({ type: "custom", name: "w", payload: '{"connector":"weather"}' });
+    const runId = db.insertJobRun({ jobId, status: "success" });
+    db.insertArtifact({ jobRunId: runId, kind: "dataset", title: "天气",
+      content: '[{"ts":"T1","values":{"temperature_2m":28}}]', meta: '{"connector":"weather"}' });
+    await withApp(db, {}, async (base) => {
+      const data = await (await fetch(`${base}/api/dataset/${jobId}`)).json();
+      expect(data.rows[0].values.temperature_2m).toBe(28);
+      expect(data.meta.connector).toBe("weather");
+
+      const del = await fetch(`${base}/api/jobs/${jobId}`, { method: "DELETE" });
+      expect(del.status).toBe(200);
+      expect((db.getJob(jobId) as { enabled: number }).enabled).toBe(0);
+    });
+    db.close();
+  });
+});

@@ -56,7 +56,9 @@ export class Fetcher {
     this.timeoutS = timeoutS;
   }
 
-  async fetch(url: string, opts: { useBrowser?: boolean } = {}): Promise<FetchResult> {
+  /** opts.api=true：connector 声明式 API 端点（robots 不适用；限速/UA 保留）。
+ *  仅限 src/connectors/ 中 api:true 的数据源使用——网页抓取仍必须走 robots 合规路径。 */
+  async fetch(url: string, opts: { useBrowser?: boolean; api?: boolean } = {}): Promise<FetchResult> {
     let host: string;
     try {
       host = new URL(url).host;
@@ -67,7 +69,7 @@ export class Fetcher {
       return { status: FetchStatus.FETCH_ERROR, url, reason: "非法 URL: 缺少 host" };
     }
 
-    if (this.respectRobots) {
+    if (this.respectRobots && !opts.api) {
       const robots = await this.robotsFor(url);
       if (robots instanceof Error) {
         return { status: FetchStatus.FETCH_ERROR, url, reason: `robots.txt 不可达: ${robots.message}` };

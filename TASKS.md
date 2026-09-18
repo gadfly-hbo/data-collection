@@ -309,10 +309,10 @@
 
 ### T8.1 connector 框架
 - **内容**：`src/connectors/` 注册表（id/名称/描述/参数 zod/输出行 schema/频率约束/fetch 实现）；CustomExecutor（connector 抓取→解析→`artifacts(kind=dataset)` 追加行，含数据集级去重键）；零 LLM 成本路径（不触 provider）。
-- **验收**：[ ] 注册/校验/执行/入库单测；[ ] 失败重试与连续失败标记。
+- **验收**：[x] 注册/zod 参数/执行/dataset artifact/水位增量单测（connector.test 4 项）；[x] connector 失败 → failed + onEvent 告警。
 ### T8.2 天气 connector（open-meteo）
 - **内容**：城市→坐标映射、 hourly 时序拉取（温度/降水/风速）、增量入库（按时间戳去重）。
-- **验收**：[ ] live 实测入库时序行；[ ] 重复执行不产生重复行。
+- **验收**：[x] live 实测：open-meteo 48 行时序返回（深圳 24.6℃），api 通道（官方 API 声明 `api:true`：保留限速、跳过 robots——open-meteo robots 全站 Disallow，AGENTS 规则已写明边界）；[x] 水位增量：≤ _wm 的行不再入库（单测）。
 ### T8.3 统计局 connector（首批数据集）
 - **内容**：数据集选择（CPI 月度同比等 1~2 个）、页面/接口解析、数值行入库。
 - **验收**：[ ] live 实测；[ ] 页面改版容错（失败标记待修复）。

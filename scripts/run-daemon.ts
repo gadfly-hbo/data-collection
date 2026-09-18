@@ -13,6 +13,7 @@ import { loadSettings, type Settings } from "../src/config.ts";
 import { DedupGate } from "../src/dedup.ts";
 import { Fetcher } from "../src/fetcher.ts";
 import { JobKernel, type JobContext } from "../src/jobs/kernel.ts";
+import { CustomExecutor } from "../src/jobs/customExecutor.ts";
 import { SourceExecutor } from "../src/jobs/sourceExecutor.ts";
 import { Pipeline } from "../src/pipeline.ts";
 import { createProviderStack } from "../src/providers/factory.ts";
@@ -88,7 +89,8 @@ export function buildContext(settings: Settings, db: Database): DaemonContext {
   const budget = settings.budget
     ? new BudgetGuard(db, settings.budget.max_tasks_per_day, settings.budget.max_input_tokens_per_day)
     : null;
-  const kernel = new JobKernel(db, { source: new SourceExecutor(pipeline) }, budget);
+  const kernel = new JobKernel(
+    db, { source: new SourceExecutor(pipeline), custom: new CustomExecutor(fetcher) }, budget);
   return {
     kernel,
     pipeline,

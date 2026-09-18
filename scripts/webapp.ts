@@ -13,6 +13,8 @@ import { getSchema } from "../src/models/schemas.ts";
 import { isOkOutcome, type RunOutcome } from "../src/pipeline.ts";
 import { JobStatus } from "../src/status.ts";
 import { SCHEMA_REGISTRY } from "../src/models/schemas.ts";
+import { CONNECTOR_REGISTRY, getConnector } from "../src/connectors/registry.ts";
+
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
 import { Database } from "../src/storage/db.ts";
@@ -108,6 +110,61 @@ export function createApp(
     } catch (e) {
       res.status(400).json({ detail: e instanceof Error ? e.message : String(e) });
     }
+  });
+
+  app.get("/api/connectors", (_req, res) => {
+    res.json(Object.values(CONNECTOR_REGISTRY).map((c) => {
+      const shape = (c.params as unknown as { _def?: { shape?: () => Record<string, { description?: string; options?: { values?: unknown[] } }> } })._def?.shape?.() ?? {};
+      return {
+        id: c.id, name: c.name, description: c.description, min_interval_s: c.minIntervalS,
+        api: !!c.api,
+        params: Object.fromEntries(Object.entries(shape).map(([k, v]) => {
+          const def = (v as { _def?: { values?: string[]; description?: string } })._def ?? {};
+          return [k, { description: def.description ?? v.description ?? "", options: def.values ?? null }];
+        })),
+      };
+    }));
+  });
+
+  app.post("/api/jobs", (req, res) => {
+    const body = req.body ?? {};
+    let connector;
+    try {
+      connector = getConnector(String(body.connector ?? ""));
+      connector.params.parse(body.params ?? {});
+    } catch (e) {
+      return res.status(400).json({ detail: e instanceof Error ? e.message : String(e) });
+    }
+    const intervalS = Number(body.interval_s ?? connector.minIntervalS);
+    if (intervalS < connector.minIntervalS) {
+      return res.status(400).json({ detail: `${connector.name} 最小间隔 ${connector.minIntervalS}s` });
+    }
+    const jobId = db.insertJob({
+      type: "custom", name: body.name ?? connector.name,
+      payload: JSON.stringify({ connector: connector.id, params: body.params ?? {}, _wm: null }),
+      schedule: JSON.stringify({ kind: "interval", interval_s: intervalS }),
+    });
+    res.json({ ok: true, id: jobId });
+  });
+
+  app.get("/api/dataset/:jobId", (req, res) => {
+    const job = db.getJob(Number(req.params.jobId));
+    if (!job) return res.status(404).json({ detail: "任务不存在" });
+    const latest = db.conn
+      .prepare("SELECT id, title, content, meta, created_at FROM artifacts WHERE kind = 'dataset' AND job_run_id IN (SELECT id FROM job_runs WHERE job_id = ?) ORDER BY id DESC LIMIT 1")
+      .get(Number(job.id)) as Record<string, unknown> | undefined;
+    if (!latest) return res.json({ rows: [], meta: null });
+    res.json({
+      rows: JSON.parse(String(latest.content)),
+      meta: JSON.parse(String(latest.meta ?? "null")),
+      created_at: latest.created_at,
+    });
+  });
+
+  app.delete("/api/jobs/:id", (req, res) => {
+    if (!db.getJob(Number(req.params.id))) return res.status(404).json({ detail: "任务不存在" });
+    db.setJobEnabled(Number(req.params.id), false);
+    res.json({ ok: true });
   });
 
   app.delete("/api/sources/:id", (req, res) => {
