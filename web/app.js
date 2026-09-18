@@ -52,6 +52,7 @@ $$(".nav-item").forEach((btn) => {
     if (btn.dataset.page === "runs") refreshRuns();
     if (btn.dataset.page === "data") refreshItems();
     if (btn.dataset.page === "sources") refreshSources();
+    if (btn.dataset.page === "overview") refreshOverview();
   });
 });
 
@@ -439,7 +440,7 @@ setInterval(() => {
 }, 15000);
 
 loadSchemas()
-  .then(() => { refreshSummary(); refreshSources(); refreshConnectors(); refreshCustomJobs(); })
+  .then(() => { refreshOverview(); refreshSummary(); refreshSources(); refreshConnectors(); refreshCustomJobs(); })
   .catch((e) => console.error("初始化失败：", e));
 
 /* ---------- 连接器市场与定制数据任务（Phase 8） ---------- */
@@ -665,3 +666,20 @@ window.go = function (name) {
   _goPrev(name);
   if (name === "research") refreshResearchJobs();
 };
+
+async function refreshOverview() {
+  try {
+    const o = await api("/api/overview");
+    $("#ov-metrics").innerHTML = `
+      <div class="metric"><div class="v">${o.metrics.today_total}</div><div class="k">今日任务</div></div>
+      <div class="metric"><div class="v">${Math.round(o.metrics.today_ok_rate * 100)}%</div><div class="k">正常率</div></div>
+      <div class="metric"><div class="v">${o.metrics.today_tokens.toLocaleString()}</div><div class="k">今日 LLM tokens</div></div>
+      <div class="metric"><div class="v">${o.scenarios.research.running}</div><div class="k">研究进行中</div></div>`;
+    $("#sc-research").textContent = `待确认 ${o.scenarios.research.pendingConfirm} · 暂停 ${o.scenarios.research.paused}`;
+    $("#sc-custom").textContent = `活跃任务 ${o.scenarios.custom.active}`;
+    $("#sc-adhoc").textContent = `今日采集 ${o.scenarios.adhoc.today} 次`;
+    $("#ov-todos").innerHTML = o.todos.length
+      ? `<div class="notice warn">⚠ 待办：${o.todos.map((t) =>
+          `<a href="javascript:void(0)" onclick="go('${t.link}')" style="margin-right:10px">${esc(t.text)} →</a>`).join("")}</div>` : "";
+  } catch (e) { console.error(e); }
+}
