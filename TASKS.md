@@ -284,3 +284,69 @@
 - [x] Python 栈全部删除（core/storage/models/scripts/tests .py/requirements*/pytest 配置/.venv），`.command` 与文档（README/AGENTS/PLAN 修订注）改写为 Node 口径
 - [x] 守护进程切换：Python daemon 干净排干退出 → TS daemon（`node scripts/run-daemon.ts --log-file data/daemon.log`，caffeinate）运行中，tick 30s 读 sources 表
 - [x] 双端同步：仓库 push；MacBook 拉取与 Node 环境说明（MacBook 需 Node ≥22.5：`uv` 不管理 node，建议官方 pkg 或 brew）
+
+---
+
+## Phase 7：Job 内核重构（地基，2026-09-18 启动）
+
+> 决策已锁定（见 PLAN §11）：统一 Job 内核；sources 保留为 source 类任务 payload 子表（FK/历史不动）；现有两场景无损迁移。
+
+### T7.1 schema v3：jobs / job_runs / artifacts
+- **内容**：`src/storage/db.ts` 升 SCHEMA_VERSION=3——新增 `jobs`（type/name/ref_id/payload/schedule/enabled + type×ref_id 唯一索引）、`job_runs`（job_id/status/node_state/tokens/started_at/finished_at）、`artifacts`（job_run_id/kind/title/content/meta）；迁移 v2→v3 含 **sources→jobs 1:1 回填**（INSERT OR IGNORE，幂等重跑安全）；配套写入接口。
+- **验收**：[ ] v2 库打开自动迁移且回填正确（重复打开幂等）；[ ] 全新库直建 v3；[ ] 迁移/接口单测。
+### T7.2 Job 内核与 Executor 接口
+- **内容**：`src/status.ts` 增 `JobStatus`（running/success/failed/paused/skipped，独立于 RunStatus 不混用）；`src/jobs/`：Job/JobResult 契约、`JobExecutor` 接口、`runJob`（生命周期包裹：job_runs running→终态回写）、`tickJobs`（扫 enabled jobs 按调度到期执行，lastRun 语义与现 tick 一致：派发时刻记账、改间隔下个 tick 生效）。
+- **验收**：[ ] 生命周期单测（成功/异常→failed/预算跳过→skipped 不派发）；[ ] tick 调度语义单测（启用过滤/间隔/改间隔生效）。
+### T7.3 SourceExecutor 挂载（行为不变迁移）
+- **内容**：`src/jobs/sourceExecutor.ts` 包装现有 pipeline（ref_id→sources 行→TaskSpec→run）；RunStatus→JobStatus 映射（SUCCESS/SKIPPED_*→success，其余→failed）；crawl_runs 动作级台账照旧。daemon `runTick` 改扫 jobs；webapp `/api/run` source 路径走内核；来源管理/发现写 sources 时同步 upsert 对应 job。
+- **验收**：[ ] 现有 daemon/webapp 全部测试语义不变通过；[ ] 真实 daemon 切换后台账连续（job_runs 与 crawl_runs 双写对齐）。
+### T7.4 Phase 7 收尾
+- **验收**：[ ] 全量测试绿 + tsc 零错误；[ ] 真实 daemon 运行观察一轮 tick；[ ] 双端同步。
+
+**阶段闸门 7**：现有两场景在新内核下行为与迁移前一致（六终态口径/去重/预算/降级全部回归），sources 历史与台账无丢失。
+
+## Phase 8：定制数据采集（connector 框架）
+
+### T8.1 connector 框架
+- **内容**：`src/connectors/` 注册表（id/名称/描述/参数 zod/输出行 schema/频率约束/fetch 实现）；CustomExecutor（connector 抓取→解析→`artifacts(kind=dataset)` 追加行，含数据集级去重键）；零 LLM 成本路径（不触 provider）。
+- **验收**：[ ] 注册/校验/执行/入库单测；[ ] 失败重试与连续失败标记。
+### T8.2 天气 connector（open-meteo）
+- **内容**：城市→坐标映射、 hourly 时序拉取（温度/降水/风速）、增量入库（按时间戳去重）。
+- **验收**：[ ] live 实测入库时序行；[ ] 重复执行不产生重复行。
+### T8.3 统计局 connector（首批数据集）
+- **内容**：数据集选择（CPI 月度同比等 1~2 个）、页面/接口解析、数值行入库。
+- **验收**：[ ] live 实测；[ ] 页面改版容错（失败标记待修复）。
+### T8.4 数据源页改造
+- **内容**：连接器卡片表单（按 demo）、dataset 预览与 CSV 导出。
+- **验收**：[ ] 添加→下一轮 tick 采集→预览可见全链路；[ ] 导出与库内一致。
+
+**阶段闸门 8**：两类 connector 零 token 稳定入库 ≥48h；导出可用。
+
+## Phase 9：Deep Research 迁移（引擎语义 + 商圈模板）
+
+### T9.1 工作流引擎
+- **内容**：`src/research/engine.ts`——声明式节点 JSON（id/prompt 模板 `{{var}}`/输出契约）、节点状态机与 `node_state` 快照、失败暂停→断点续跑、变量传递。
+- **验收**：[ ] 引擎单测（顺序执行/失败暂停/续跑从断点/变量注入）。
+### T9.2 pi SDK 节点执行器
+- **内容**：研究 agent 封装（createAgentSession + minimax_web_search），检索溯源强制（无实际检索证据→节点失败续跑，禁止模型记忆伪装）。
+- **验收**：[ ] 单测（fake session）；[ ] live 检索节点实证。
+### T9.3 商圈研究模板迁移
+- **内容**：flow-center `district-research.json` 语义移植（采证双分支/证据 A-C 等级/写作/校验/补证循环）；计划确认流（出检索计划→用户确认→才执行）。
+- **验收**：[ ] 一份完整商圈报告（含证据链与数据缺口清单）；[ ] 断点续跑实证；[ ] 溯源校验拦截无来源输出。
+### T9.4 品牌 / 企业模板
+- **验收**：[ ] 两类模板各跑通一份报告；[ ] 模板仅 JSON 差异，引擎零改动。
+### T9.5 研究 job 生命周期与预算
+- **内容**：research job 计划确认态、token 预估与上限熔断、暂停/续跑 API。
+- **验收**：[ ] 确认前零消耗；[ ] 超限暂停可续。
+
+**阶段闸门 9**：三类研究模板各产出一份含可追溯证据链的报告；断点续跑与预算熔断实证。
+
+## Phase 10：控制台场景化（按 2026-09-18 demo 实现）
+
+### T10.1 总览页（场景卡片+指标+待办） 
+### T10.2 研究工作台 UI（发起表单/节点链执行视图/报告预览/证据表/续跑补证）
+### T10.3 对话助手场景衔接（研究意图→草稿卡片→工作台确认）
+### T10.4 导出扩展（report Markdown / dataset CSV）+ 文档收尾
+- **验收**：[ ] demo 所示六页全部真实可用；[ ] 双端同步与文档（README/AGENTS/PLAN）收口。
+
+**阶段闸门 10**：非技术用户可独立完成「发起研究→看报告」「添加天气源→导出数据」「对话建临时采集」三条完整路径。

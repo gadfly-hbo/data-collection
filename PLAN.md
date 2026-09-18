@@ -1,5 +1,35 @@
 # 智能数据采集与结构化工具开发落地方案与实施计划
 
+> **文档版本**：v3.0（任务内核 + 三场景重构）
+> **修订日期**：2026-09-18
+
+## §11 v3 重构架构：任务内核 + 三场景执行器（2026-09-18 定稿）
+
+产品从「sources 表驱动的采集调度器」重构为「**统一 Job 内核 + 场景执行器**」，服务三类采集场景：
+
+| 场景 | 执行器 | 执行模型 | LLM 角色 | 产出 artifact |
+| :--- | :--- | :--- | :--- | :--- |
+| ① 深度研究（商圈/品牌/企业） | `ResearchExecutor` | 多步工作流：检索采证→整合→写作→校验→补证循环，断点续跑 | 核心 | `report`（Markdown+带等级证据链） |
+| ② 定制数据采集（天气/统计局） | `CustomExecutor`（connector 注册表） | 单步确定性抓取→解析→行式入库 | 默认不用（零 token） | `dataset`（时序/表格行） |
+| ③ 网页来源 & 临时采集 | `SourceExecutor`（现有 pipeline） | 单页流水线 fetch→parse→去重→提取 | 提取 | `item`（extracted_items，沿用） |
+
+**四个核心抽象：**
+
+1. **统一 Job 模型**（`jobs` 表）：`type`（source/custom/research）+ `payload`（per-type zod 校验的 JSON）+ `schedule`（interval/cron/once）。**sources 表保留为 type=source 任务的 payload 子表**（`jobs.ref_id → sources.id`，1:1 回填迁移）——保住 `crawl_runs.source_id` 外键与历史台账连续性（决策点 1+4：统一的是调度/预算/待办口径，不强行并表）。
+2. **Executor 接口**：`run(job, ctx) → JobResult`；内核 `runJob` 统一包裹生命周期（job_runs 建 running 行 → 执行 → 终态/tokens/断点快照回写）。
+3. **两级台账**：`job_runs`（任务粒度：研究节点状态、续跑点、token 汇总；`JobStatus` 独立状态机 running/success/failed/paused/skipped）+ `crawl_runs`（采集动作粒度，RunStatus 六终态，**原样保留**）。
+4. **统一 artifacts**：`report` / `dataset` / `item` 三种 kind；`extracted_items` 不迁移（kind=item 的语义由它承担），报告与时序数据入新 `artifacts` 表。
+
+**场景要点：**
+- 研究（Phase 9）：工作流引擎只迁 flow-center 的**引擎语义**（声明式节点 JSON、`{{var}}` 传递、失败续跑、检索溯源强制 hasSearchProvenance）+ 商圈模板；节点执行用 pi SDK 嵌入（createAgentSession + minimax_web_search MCP），不用其 CLI 套壳。品牌/企业 = 新增模板 JSON，引擎不动（决策点 2）。
+- 定制采集（Phase 8）：connector 注册表（id + 参数 zod + fetch 实现 + 输出行 schema）；**纯 TS fetch，不走 MCP**；首批天气（open-meteo 免费无 Key）+ 统计局（决策点 3）。
+- 临时采集：现有能力挂内核；对话助手识别研究意图时产出「研究任务草稿」引导至研究工作台（Phase 10）。
+
+**推进顺序**：Phase 7 内核（地基，现有场景无损迁移）→ Phase 8 定制采集（轻场景验证内核）→ Phase 9 研究迁移（重头）→ Phase 10 控制台场景化（总览/研究工作台/衔接/导出，按 2026-09-18 demo 实现）。
+
+---
+
+
 > **文档版本**：v2.0（Provider 无关架构）
 > **修订日期**：2026-09-16
 > **适用对象**：希望以近零边际成本构建自动化采集与结构化提取工具的开发者。
