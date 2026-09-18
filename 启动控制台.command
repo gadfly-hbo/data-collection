@@ -1,12 +1,13 @@
 #!/bin/bash
-# 双击启动采集控制台（自动准备环境 + 打开浏览器）
+# 双击启动采集控制台（自动装依赖 + 打开浏览器）
 cd "$(dirname "$0")"
 
-if [ ! -x .venv/bin/python ]; then
-  echo "首次运行：正在创建 Python 环境（约 1~2 分钟，请勿关闭窗口）…"
-  python3 -m venv .venv || { echo "创建环境失败：需要 python3"; read -r; exit 1; }
+if ! command -v node >/dev/null 2>&1; then
+  echo "未检测到 Node.js（需 ≥22.5）：请先从 https://nodejs.org 安装，或运行 brew install node"
+  read -r
+  exit 1
 fi
-echo "正在检查依赖…"
-.venv/bin/pip install -q --disable-pip-version-check -r requirements.txt -r requirements-ui.txt
+echo "正在安装依赖（首次约 1~2 分钟，请勿关闭窗口）…"
+npm install --no-audit --no-fund
 echo "启动中，浏览器将自动打开（若未打开请手动访问提示的地址）；采集完成后可直接关闭本窗口。"
-exec .venv/bin/python scripts/webapp.py
+exec node scripts/webapp.ts

@@ -1,76 +1,54 @@
 # 智能数据采集与结构化工具
 
-自适应、低维护成本、供应商可替换的网页采集与结构化提取工具：自有抓取层（httpx + trafilatura，可选 Playwright）+ LLM API 语义提取（Provider 抽象），产出 Pydantic 强类型数据落库 SQLite，全程台账可追溯。
+自适应、低维护成本、供应商可替换的网页采集与结构化提取工具（TypeScript 版）：自有抓取层（fetch + Readability/turndown，可选 Playwright）+ LLM API 语义提取（基于 pi-ai 统一供应商目录），产出 zod 强类型数据落库 SQLite；Web 控制台内嵌 pi SDK 提供对话式需求收集与来源发现。
 
-> 架构设计、数据契约与各阶段验收标准见 [PLAN.md](PLAN.md)；任务进度见 [TASKS.md](TASKS.md)。
+> 架构设计、数据契约与各阶段验收标准见 [PLAN.md](PLAN.md)；任务进度见 [TASKS.md](TASKS.md)；协作规范见 [AGENTS.md](AGENTS.md)。
 
 ## 核心特性
 
 - **抗改版语义抓取**：LLM 理解正文语义提炼字段，DOM 改版不影响抽取稳定性
-- **供应商可替换**：Gemini / Anthropic 协议（MiniMax 等）/ OpenAI 协议（DeepSeek、OpenRouter、Ollama 等），改配置即切换，主供应商故障自动降级
+- **供应商可替换**：pi-ai 统一目录接入 MiniMax-CN / Anthropic / Google / OpenAI 等；改 `settings.yaml` 即切换，主通道配额耗尽自动退避降级
+- **对话式采集**：Web 控制台默认页是对话助手——自然语言描述需求，助手追问补齐、整理成计划卡片，**经你确认后才创建并执行**
+- **来源发现**：发现 Agent（pi SDK 嵌入 + MiniMax `web_search` MCP）检索候选来源，去重过滤后供确认
 - **成本可控**：提取前去重（内容未变 0 次 LLM 调用）、令牌桶限速、日预算熔断
-- **可追溯证据链**：SHA-256 原始快照 + `crawl_runs` 运行台账（六种终态全量记录）
-- **轻量部署**：纯 Python + SQLite，无常驻外部依赖
+- **可追溯证据链**：SHA-256 原始快照 + `crawl_runs` 六终态台账（异常也入账）
+- **轻量部署**：Node 直跑 TypeScript，无构建步骤；SQLite 单文件
 
-## 从零到运行（约 10 分钟）
+## 从零到运行
 
 ### 1. 安装
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-可选扩展：
-
-```bash
-pip install -r requirements-ui.txt                          # Web 监控面板
-pip install playwright && playwright install chromium       # JS 渲染站点支持
+# 需要 Node.js ≥22.5（推荐 24+）
+npm install
+# 可选：JS 渲染站点支持
+npm install -D playwright && npx playwright install chromium
 ```
 
 ### 2. 配置 API Key
 
-在 [Google AI Studio](https://aistudio.google.com/apikey)（免费）、[MiniMax 开放平台](https://platform.minimax.cn) 或 [DeepSeek](https://platform.deepseek.com) 申请 Key，然后：
+在 [MiniMax 开放平台](https://platform.minimax.cn) 获取 Token Plan Key（本项目主通道），然后：
 
 ```bash
-cp .env.example .env    # 编辑 .env 填入至少一个 Key
+cp .env.example .env    # 编辑 .env 填入 Key
 ```
 
-`.env` 已被 `.gitignore` 排除，**严禁提交到仓库**。
+`.env` 已被 `.gitignore` 排除，**严禁提交**。代码会自动把 `MINIMAX_API_KEY` 桥接为 pi-ai 期望的 `MINIMAX_CN_API_KEY`。
 
-### 3. 首次采集
+### 3. 使用
 
 ```bash
-# 单次采集（任意有正文页面的公开网页）
-python scripts/run_once.py --url "https://en.wikipedia.org/wiki/Web_scraping"
+npm run webapp                      # Web 控制台（自动开浏览器）——对话助手/采集/来源管理/台账/导出
+# 或双击项目根目录的「启动控制台.command」（macOS，非技术用户入口）
 
-# JS 渲染站点（需已安装 playwright）
-python scripts/run_once.py --url "https://quotes.toscrape.com/js/" --browser
+npm run run-once -- --url "https://en.wikipedia.org/wiki/Web_scraping"   # 单次采集（CLI）
+npm run run-once -- --url <JS渲染站> --browser                            # 浏览器渲染路径
+
+npm run import-sources              # sources.yaml → sources 表（幂等）
+npm run run-daemon -- --log-file data/daemon.log   # 常驻守护（tick 每 30s）
 ```
 
-输出 JSON 包含 `status`、Token 用量与结构化 `item`。退出码：0 成功/跳过，1 任务失败，2 配置错误。
-
-### 4. 常驻采集
-
-```bash
-python scripts/import_sources.py     # sources.yaml → sources 表（幂等，可重复执行）
-python scripts/run_daemon.py         # 守护进程：每 30s 扫描来源表，按 interval_s 调度
-```
-
-来源的新增/启停/改间隔可编辑 `sources.yaml` 后重新 `import_sources.py`，或直接在面板「来源管理」页操作，**下一个 tick（30s）内生效，无需重启**。Ctrl-C 优雅退出（排干在途任务）。
-
-### 5. 查看数据
-
-```bash
-python scripts/webapp.py            # Web 控制台（推荐，自动打开浏览器）
-python scripts/export_data.py --format json --since 2026-09-16   # 命令行导出 JSON
-python scripts/export_data.py --format csv --out out.csv         # 导出 CSV（Excel 友好）
-streamlit run scripts/dashboard.py                               # Streamlit 面板
-```
-
-**Web 控制台**（`http://localhost:8500`）面向非技术用户，打开默认进入**对话助手**：用自然语言描述需求（"帮我每天早上盯一下 XX 首页的热点"），助手会追问补齐信息并整理成采集计划卡片，**经你确认后**才会创建来源并执行。其余页面：「采集执行」直接对已知网址单次采集；「来源管理」增删改启停；「运行记录」查看台账；「数据浏览」与「导出」查看和下载结构化结果。macOS 上也可以直接**双击项目里的 `启动控制台.command`**（自动装依赖并打开浏览器）。界面遵循 JuanerAI Prism 棱镜设计规范。
-
-> 单写约束：`webapp.py`（默认内置定时调度）与 `run_daemon.py` 请**二选一**运行；两者同时跑属违规。`--no-scheduler` 可关闭 webapp 内的调度只做手动触发与查看。
+> **单写约束**：`webapp`（默认内置调度）与 `run-daemon` **二选一**运行；`--no-scheduler` 可关闭 webapp 内调度。
 
 ## 配置指南
 
@@ -78,79 +56,62 @@ streamlit run scripts/dashboard.py                               # Streamlit 面
 
 | 段 | 说明 |
 | :--- | :--- |
-| `provider.primary` / `provider.fallback` | 主/备供应商名；主退避穷尽（429/5xx×5 次）自动切换 |
-| `provider.<name>.rpm` | 主动限速（次/分钟），按供应商配额保守设置 |
-| `provider.openai-compat.response_format` | `json_schema`（默认）/ `json_object` / `none`，适配端点对结构化输出的支持差异 |
+| `provider.primary` / `fallback` | pi-ai 通道名（`minimax-cn` / `anthropic` / `google` / `openai` / `minimax`） |
+| `provider.<name>.model` / `.rpm` | 模型名（须存在于 pi-ai 目录）与主动限速（次/分钟） |
 | `budget` | 日预算双上限（任务数 / input tokens），超限当日停止派发 |
-| `scheduler.tick_s` | 守护进程扫描 sources 表的周期 |
+| `scheduler.tick_s` | 守护进程扫描 sources 表周期 |
 | `fetch` | UA、robots 合规开关、同域名最小请求间隔 |
-| `alerts.macos_notify` | BLOCKED / 认证失败时是否发 macOS 通知 |
+| `alerts.macos_notify` | BLOCKED / 认证失败时发 macOS 通知 |
 
 ### 采集来源（sources 表）
 
-字段：`url`、`name`、`schema_type`（`models/registry.py` 注册的类名：`NewsItem` / `CompetitorEvent`）、`interval_s`（≥ 60）、`enabled`、`use_browser`（JS 站点开关）、`instruction`（附加提取指令）。初始模板见 `config/sources.yaml`。
+字段：`url`、`name`、`schema_type`（`src/models/schemas.ts` 的 zod 注册类名：`NewsItem` / `CompetitorEvent`）、`interval_s`（≥ 60）、`enabled`、`use_browser`、`instruction`。初始模板 `config/sources.yaml`，经 `import-sources` 入库后以**表为单一事实源**（控制台「来源管理」与对话助手直接读写表，下个 tick 生效）。
 
 ### 自定义提取 Schema
 
-在 `models/` 新建 Pydantic 模型（字段写中文 `description`，作为 LLM 提取的语义提示），并在 `models/registry.py` 注册——面板下拉与校验自动生效。
+在 `src/models/schemas.ts` 新增 zod 模型（字段写中文 `description`）并注册进 `SCHEMA_REGISTRY`——控制台下拉、校验、规划器自动生效。
 
 ## 数据与运维
 
-SQLite 库位于 `data/collector.db`，三张核心表：
+SQLite 库 `data/collector.db`，三张核心表：
 
 ```sql
--- 运行台账：每次采集的终态（成功/失败/跳过原因全量记录）
-SELECT status, COUNT(*) FROM crawl_runs GROUP BY status;
--- Token 监控：按天统计（仅计消耗 LLM 的任务）
+SELECT status, COUNT(*) FROM crawl_runs GROUP BY status;          -- 运行台账
 SELECT substr(created_at,1,10) d, SUM(input_tokens), SUM(output_tokens)
-FROM crawl_runs WHERE status IN ('SUCCESS','SCHEMA_ERROR') GROUP BY d;
--- 查某 URL 的全部历史
-SELECT * FROM crawl_runs WHERE url LIKE '%en.wikipedia.org%' ORDER BY id DESC;
+FROM crawl_runs WHERE status IN ('SUCCESS','SCHEMA_ERROR') GROUP BY d;  -- Token 监控
+SELECT * FROM crawl_runs WHERE url LIKE '%wikipedia%' ORDER BY id DESC; -- 按 URL 查历史
 ```
 
 - 原始正文快照：`data/raw/{sha256}.md`（内容寻址，天然去重）
-- 预算调整：改 `settings.yaml` 的 `budget` 后重启守护进程
-- 写入约定：SQLite 单 Worker 串行写；面板读路径为 `mode=ro` 只读连接，与采集并发不冲突
-
-**Web 控制台** 的界面代码在 `web/`（原生 HTML/JS/CSS，无构建步骤），后端 API 在 `scripts/webapp.py`（FastAPI）。若要定制界面，直接改这三个文件即可，刷新浏览器生效。
+- 写入约定：`Database` 单连接全进程复用 + 单 Worker 串行；控制台只读路径与面板 `mode=ro` 并发读互不干扰（WAL）
+- 预算调整：改 `settings.yaml` 的 `budget` 后重启进程
 
 ## 常见故障排查
 
 | 现象 | 原因与处理 |
 | :--- | :--- |
 | `SKIPPED_UNCHANGED` | 内容与上次一致，去重闸门跳过（0 成本，正常行为） |
-| `SKIPPED_NO_CONTENT` | 页面无正文（列表页/聚合页）；`run_once` 加 `--browser` 或来源设 `use_browser: true` 再试 |
-| `BLOCKED`（403/429） | 目标站风控或 robots 拒绝。确认 UA 合规；robots 不允许则该站不可采 |
-| `FETCH_ERROR` | 网络超时、5xx 或页面 404；看 `crawl_runs.error_msg` |
-| `SCHEMA_ERROR` | 两次提取均未通过校验；查看 `error_msg` 中的模型原始输出片段 |
-| 429 频繁 | 自动指数退避（2s→32s）已内置；持续出现则调低 `rpm` 或等待配额刷新 |
-| 主供应商不可用 | 自动切换 fallback，`crawl_runs.provider` 可见实际通道 |
-| `API key not valid` | `.env` 的 Key 无效或未生效；修正后重启进程 |
-| MiniMax 的 input_tokens 显示 1 | 该端点上报不准（已知问题）；预算以任务数上限为主防线 |
-
-## 双端开发同步（Mac mini ↔ MacBook）
-
-仓库位置：mini `~/DevWorkSpace/Projects/data-collection`；MacBook `~/Dev/Projects/data-collection`。远端为 GitHub `origin`。
-
-**工作流**：在哪端改的就在哪端 `git commit`，然后运行 `scripts/sync_peer.sh`——先 `git push`，再经 SSH 让对端 `git pull --ff-only`（对端有本地未推送改动时会报错中止，手动先合并，防止覆盖）。对端 SSH 别名：mini 端为 `macbook`，MacBook 端为 `myhost`（见各自 `~/.ssh/config`）。
-
-> `.env` 不进 git，换端或重装时需单独复制（mini→MacBook 示例）：
-> `scp .env macbook:/Users/huangbo/Dev/Projects/data-collection/.env`
+| `SKIPPED_NO_CONTENT` | 页面无正文（列表页/聚合页）；加 `--browser` 或来源设 `use_browser: 1` 再试 |
+| `BLOCKED`（403/429） | 目标站风控或 robots 拒绝；robots 不允许则该站不可采 |
+| `FETCH_ERROR` + `Provider is not configured: google` | 降级链的备用通道缺 Key：给 `settings.yaml` 里配置的 fallback 通道补 Key，或改 primary/fallback 组合 |
+| `429 … Token Plan 用量上限` | MiniMax 配额周期耗尽：内置退避已重试，仍失败会记台账并告警；等待周期刷新或提额 |
+| `SCHEMA_ERROR` | 两次提取均未通过校验；`error_msg` 含模型原始输出片段 |
+| `MINIMAX_API_KEY` 配了仍报鉴权失败 | 确认 `.env` 在项目根目录；pi-ai 走 `MINIMAX_CN_API_KEY`，代码已自动桥接 |
 
 ## 开发与测试
 
 ```bash
-scripts/check.sh                 # 一键：装依赖 + 全量测试 + 覆盖率报告
-pytest                           # 全量测试（默认跳过 live 用例）
-pytest -m live                   # 真实 API 冒烟（需 .env 中配置 Key）
-pytest --cov=core --cov=storage  # 覆盖率
+npm test                     # vitest 全量（live 除外）
+npm run typecheck            # tsc --noEmit 严格检查
+npx vitest run tests/live    # 真实 API 冒烟（需 .env Key，含 pi SDK+MCP 发现链路）
 ```
 
-核心模块语句覆盖 ≥ 80%；live 用例对真实外部服务（网络 / LLM API）做冒烟，无 Key 时自动跳过。
+代码结构：`src/`（core：fetcher/parser/pipeline/dedup/budget/rateLimiter/planner；`providers/`：pi-ai 封装与降级限速栈；`storage/`：SQLite/快照/台账/查询；`discovery/`：pi SDK 发现 Agent；`models/`：zod 契约）、`scripts/`（CLI 与 webapp 入口）、`web/`（原生 HTML/JS/CSS 控制台，Prism 规范）、`tests/`。
 
 ## 硬性约束（开发必读）
 
-- Provider SDK 只允许出现在 `core/providers/` 内，其余代码只依赖 `LLMProvider` 协议
+- pi SDK 边界：`@earendil-works/pi-ai` 只在 `src/providers/`，`@earendil-works/pi-coding-agent` 只在 `src/discovery/`
 - 凭证只从环境变量 / `.env` 读取
 - 对目标站点的任何 HTTP 请求必须经过 `Fetcher`（robots 检查 + 限速）
-- SQLite 单 Worker 串行写入；每个任务的终态必须写入 `crawl_runs` 台账
+- SQLite 单 Worker 串行写；每个任务的终态必须写入 `crawl_runs` 台账
+- 发现 Agent 只产出候选，执行前需用户确认

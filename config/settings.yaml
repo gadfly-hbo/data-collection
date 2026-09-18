@@ -1,23 +1,15 @@
 # 全局运行配置（骨架值来自 PLAN.md §5.1；budget 参数待 T3.3 按实测基线校准）
 
 provider:
-  primary: gemini              # 主供应商（配置了对应 Key 的即可用）
-  fallback: anthropic-compat   # 主供应商退避穷尽后自动切换
-  gemini:
-    # 模型名以官方文档当前稳定版为准
-    model: gemini-flash-latest
-    rpm: 10                    # 主动限速（次/分钟）：按免费层配额保守设置
-  anthropic-compat:            # Anthropic 协议兼容端点：MiniMax / Anthropic 官方等
+  # pi-ai 供应商目录的通道名（minimax-cn / anthropic / google / openai / minimax）
+  primary: minimax-cn
+  fallback: google
+  minimax-cn:
     model: MiniMax-M3
-    base_url: https://api.minimax.cn/anthropic
-    api_key_env: MINIMAX_API_KEY
-    max_tokens: 16384          # M3 为思考型模型，输出含思考 token，需留余量
     rpm: 30                    # 主动限速（次/分钟），按实际配额调整
-  openai-compat:               # OpenAI 协议端点：OpenAI / DeepSeek / OpenRouter / Ollama 等
-    model: deepseek-chat       # 亦可为 OpenRouter 免费模型或本地 Ollama 模型
-    base_url: https://api.deepseek.com/v1
-    api_key_env: DEEPSEEK_API_KEY
-    response_format: json_schema  # 端点不支持时改 json_object 或 none（纯 Prompt 约束）
+  google:
+    model: gemini-flash-latest # 以 pi-ai 目录当前可用模型为准
+    rpm: 10                    # 免费层量级，保守设置
 
 # 日预算熔断（任务数 / Token 数双上限，超限当日停止派发新任务）
 # 按 T1.5/T1.6 实测基线校准：单任务 input 0.7万~2.8万（chars/4 估算）、output ~240

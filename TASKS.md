@@ -252,3 +252,35 @@
 | 免费层实测日可支撑任务数 | 待推算 | 阶段闸门 1 |
 | `budget.max_tasks_per_day` 定值 | 待定 | T3.3 |
 | `budget.max_input_tokens_per_day` 定值 | 待定 | T3.3 |
+
+---
+
+## Phase 6：TypeScript 重写 + pi SDK 嵌入（2026-09-18，按用户指令完成）
+
+> 范围：① 产品全线改写为 TypeScript（不再使用 Python）② pi 不用 CLI 套壳，改为 SDK 库式嵌入。做完即停，更大规模的产品重构另行规划。
+
+### T6.1-T6.5 TS 全移植
+- **内容**：`src/`（status/models(zod)/dotenv/config/storage(db/rawStore/ledger/queries)/dedup/budget/rateLimiter/fetcher(fit: robots+限速+条件请求+Playwright)/parser(Readability+turndown)/pipeline/planner/providers）+ `scripts/`（run-once/run-daemon/export-data/import-sources/webapp，Express）；Node 22.5+ 直跑 .ts，import 用 `.ts` 扩展名
+- **选型**：node:sqlite（WAL/外键/迁移与 Python 版兼容同一库文件）；zod→JSON Schema 注入 + 字符串感知 JSON 提取 + zod 强校验（语义与 Python 版一致：UsageReportedError 带用量、304-after-failure 丢弃验证器、异常兑换 FETCH_ERROR 入台账）
+- **验收**：
+  - [x] `npx tsc --noEmit` 零错误；`npx vitest run` 67/67 通过（14 文件）
+  - [x] 真实端到端：TS run-once 读写与 Python daemon 共用的 `data/collector.db`（WAL 下双引擎互操作，台账行 49/50 连续）；import-sources 幂等导入 2 来源
+  - [x] webapp 冒烟：index/summary/sources 200；前端 `web/` 与 `/api/*` 契约不变（新增 `/api/discover`）
+
+### T6.4 LLM 层换 pi-ai
+- **内容**：`PiAiProvider`（pi-ai 统一目录：minimax-cn / minimax / anthropic / google / openai；`MINIMAX_API_KEY`→`MINIMAX_CN_API_KEY` 桥接）；FallbackProvider/RateLimitedProvider 语义保留（退避穷尽→降级→FETCH_ERROR 入账）
+- **验收**：
+  - [x] pi-ai 直连 MiniMax-M3 实测（stop/text/usage/cost 字段齐全）；429 归一化 TransientProviderError（探针实证）
+  - [ ] 真实 SUCCESS 提取待 MiniMax 配额刷新（`npm run test:live` 已就绪，429 时优雅跳过；提取链路的 schema→parse→zod 逻辑有单测覆盖）
+
+### T6.7 pi SDK 嵌入：发现 Agent
+- **内容**：`src/discovery/agent.ts`——`createAgentSession`（SDK，非子进程套壳）自动加载本机 `~/.pi/agent/mcp.json`，MiniMax `web_search` 进工具列表；产出候选来源 → zod 校验 → 与 sources 表去重 → 用户确认后才入库调度（发现层不碰主链路与台账）
+- **验收**：
+  - [x] SDK 探针实证：`createAgentSession` 模型自动解析 MiniMax-M3，`state.tools` 含 `minimax_web_search`/`minimax_understand_image`（MCP 经 SDK 生效，非套壳）
+  - [x] 单测 5 项（parseCandidates/数组括号感知/最终文本提取/与库去重/供应商错误抛出）；`/api/discover` 端点 + 501/422 分支
+  - [ ] 真实发现检索待配额刷新（SDK 链路已验证到 429 层，工具注册与提示词就绪）
+
+### T6.8 切换与清理
+- [x] Python 栈全部删除（core/storage/models/scripts/tests .py/requirements*/pytest 配置/.venv），`.command` 与文档（README/AGENTS/PLAN 修订注）改写为 Node 口径
+- [x] 守护进程切换：Python daemon 干净排干退出 → TS daemon（`node scripts/run-daemon.ts --log-file data/daemon.log`，caffeinate）运行中，tick 30s 读 sources 表
+- [x] 双端同步：仓库 push；MacBook 拉取与 Node 环境说明（MacBook 需 Node ≥22.5：`uv` 不管理 node，建议官方 pkg 或 brew）

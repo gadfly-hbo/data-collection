@@ -1,14 +1,14 @@
-# Python
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Python（已移除栈，保留规则防遗留文件混入）
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
 venv/
 
 # 测试与工具缓存
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
 .coverage
 htmlcov/
 

@@ -5,6 +5,8 @@
 > **适用对象**：希望以近零边际成本构建自动化采集与结构化提取工具的开发者。
 >
 > **v1.1 → v2.0 核心变更**：移除对 Google Antigravity CLI（`agy`）的强依赖，不再绑定任何 CLI 工具与消费级订阅登录态。LLM 推理改为通过**标准 API**（Gemini API 免费层 / 任意 OpenAI 兼容端点 / 本地模型）接入，抓取与提取职责解耦为自有模块。文末附完整差异对照表。
+>
+> **v2.0 → v2.1 修订（2026-09-18）**：技术栈由 Python 整体迁移至 **TypeScript（Node ≥22.5，直跑 .ts 无构建）**；LLM 接入层由自研 Provider 实现改为**基于 pi-ai 统一供应商目录**（`src/providers/piAiProvider.ts`），SDK 边界：`pi-ai` 仅限 `src/providers/`。发现 Agent 以 **pi SDK 嵌入**（`createAgentSession`，加载本机 `~/.pi/agent/mcp.json` 的 MiniMax MCP `web_search`），边界：`pi-coding-agent` 仅限 `src/discovery/`。数据库契约（三表/状态机/快照）、成本防线（去重/限速/退避/降级/预算）、Web 控制台功能面**全部保持不变**，zod 替代 Pydantic、readability+turndown 替代 trafilatura、node:sqlite 替代 sqlite3。§4 技术选型表与 §5 代码骨架中的 Python 片段为历史参考。
 
 ---
 
