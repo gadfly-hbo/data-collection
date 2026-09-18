@@ -31,6 +31,8 @@ from pydantic import BaseModel  # noqa: E402
 import export_data  # noqa: E402
 import run_daemon as daemon  # noqa: E402
 from core.budget import BudgetExhausted  # noqa: E402
+from core.planner import plan_with_user  # noqa: E402
+from core.providers.base import TransientProviderError  # noqa: E402
 from models.registry import SCHEMA_REGISTRY  # noqa: E402
 from storage.db import Database  # noqa: E402
 from storage.queries import (blocked_sources, daily_tokens,  # noqa: E402
@@ -59,6 +61,10 @@ class RunIn(BaseModel):
     schema_type: str = "NewsItem"
     use_browser: bool = False
     instruction: str = ""
+
+
+class ChatIn(BaseModel):
+    history: list[dict]  # [{"role": "user"|"assistant", "content": str}]
 
 
 def outcome_to_dict(outcome) -> dict:
@@ -100,6 +106,41 @@ def create_app(ctx: daemon.DaemonContext, db: Database, db_path: pathlib.Path,
     @app.get("/")
     def index():
         return FileResponse(WEB_DIR / "index.html")
+
+    @app.get("/api/schemas")
+    def api_schemas():
+        """注册的提取 Schema（名称 + 中文描述），供前端下拉与规划器使用。"""
+        return {
+            name: {
+                "description": (cls.__doc__ or "").strip(),
+                "fields": {
+                    field: (info.description or "") for field, info in
+                    cls.model_fields.items() if field not in ("source_url", "scraped_at")
+                },
+            }
+            for name, cls in SCHEMA_REGISTRY.items()
+        }
+
+    @app.post("/api/chat")
+    async def api_chat(body: ChatIn):
+        """对话式需求收集：助手整理采集计划草案（plan 为 null 表示还在追问）。"""
+        if not body.history or not all(
+                h.get("role") in ("user", "assistant") and h.get("content")
+                for h in body.history):
+            raise HTTPException(status_code=422, detail="对话历史格式不正确")
+        try:
+            plan_reply = await plan_with_user(
+                ctx.pipeline.provider, body.history, sorted(SCHEMA_REGISTRY))
+        except TransientProviderError:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM 供应商暂时不可用（配额或限流），请稍后重试") from None
+        if plan_reply.plan is not None and (
+                plan_reply.plan.schema_type not in SCHEMA_REGISTRY):
+            plan_reply.plan.schema_type = sorted(SCHEMA_REGISTRY)[0]  # 兜底到首个注册类型
+        return {"reply": plan_reply.reply,
+                "plan": plan_reply.plan.model_dump()
+                if plan_reply.plan is not None else None}
 
     @app.get("/api/summary")
     def api_summary():

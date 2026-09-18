@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import run_daemon as rd  # noqa: E402
 import webapp  # noqa: E402
 from core.pipeline import RunOutcome, RunStatus  # noqa: E402
+from core.providers.base import ExtractionResult  # noqa: E402
 from storage.db import Database  # noqa: E402
 from test_daemon import _FakePipeline  # noqa: E402
 
@@ -45,7 +46,8 @@ def test_index_served(env):
     client, _, _ = env
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "采集控制台" in resp.text
+    assert "棱镜采集工作台" in resp.text
+    assert "对话助手" in resp.text  # 默认首页为对话助手
 
 
 def test_summary_endpoint(env):
@@ -133,3 +135,86 @@ def test_export_download(env):
     assert "attachment" in resp.headers["content-disposition"]
     resp = client.get("/api/export?format=xml")
     assert resp.status_code == 400
+
+
+# ---------- T5.4：对话助手 ----------
+
+class _ChatFakeProvider:
+    def __init__(self, item=None, error=None):
+        self.item = item
+        self.error = error
+
+    async def extract(self, content, schema, *, instruction=""):
+        if self.error is not None:
+            raise self.error
+        return ExtractionResult(item=self.item, input_tokens=1, output_tokens=1,
+                                provider="fake", model="m")
+
+
+def test_schemas_endpoint(env):
+    client, _, _ = env
+    data = client.get("/api/schemas").json()
+    assert set(data) == {"NewsItem", "CompetitorEvent"}
+    assert data["NewsItem"]["description"]
+    assert "title" in data["NewsItem"]["fields"]
+
+
+def test_chat_returns_plan(env):
+    from models.plan_schema import CollectionPlan, PlanReply
+
+    client, pipeline, _ = env
+    plan = CollectionPlan(name="HN 热点", url="https://news.ycombinator.com",
+                          schema_type="NewsItem", interval_s=3600)
+    pipeline.provider = _ChatFakeProvider(PlanReply(reply="计划已整理好", plan=plan))
+    body = client.post("/api/chat", json={
+        "history": [{"role": "user", "content": "帮我每小时盯一下 HN"}],
+    }).json()
+    assert body["reply"] == "计划已整理好"
+    assert body["plan"]["url"].endswith("ycombinator.com")
+    assert body["plan"]["interval_s"] == 3600
+
+
+def test_chat_asks_question_when_incomplete(env):
+    from models.plan_schema import PlanReply
+
+    client, pipeline, _ = env
+    pipeline.provider = _ChatFakeProvider(
+        PlanReply(reply="请把页面链接发我", plan=None))
+    body = client.post("/api/chat", json={
+        "history": [{"role": "user", "content": "帮我盯一下科技新闻"}],
+    }).json()
+    assert body["plan"] is None
+    assert "链接" in body["reply"]
+
+
+def test_chat_schema_type_falls_back_to_registry(env):
+    from models.plan_schema import CollectionPlan, PlanReply
+
+    client, pipeline, _ = env
+    plan = CollectionPlan(name="x", url="https://x.example",
+                          schema_type="Nope", interval_s=60)
+    pipeline.provider = _ChatFakeProvider(PlanReply(reply="ok", plan=plan))
+    body = client.post("/api/chat", json={
+        "history": [{"role": "user", "content": "采集 https://x.example"}],
+    }).json()
+    assert body["plan"]["schema_type"] in {"NewsItem", "CompetitorEvent"}
+
+
+def test_chat_invalid_history_rejected(env):
+    client, _, _ = env
+    assert client.post("/api/chat", json={"history": []}).status_code == 422
+    assert client.post("/api/chat", json={
+        "history": [{"role": "user", "content": ""}]}).status_code == 422
+
+
+def test_chat_provider_unavailable_is_503(env):
+    from core.providers.base import TransientProviderError
+
+    client, pipeline, _ = env
+    pipeline.provider = _ChatFakeProvider(
+        error=TransientProviderError("429 用量上限"))
+    resp = client.post("/api/chat", json={
+        "history": [{"role": "user", "content": "采集点新闻"}],
+    })
+    assert resp.status_code == 503
+    assert "稍后重试" in resp.json()["detail"]

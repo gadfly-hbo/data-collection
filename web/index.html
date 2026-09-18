@@ -3,92 +3,172 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>采集控制台</title>
+  <title>棱镜采集工作台</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>🕸️ 采集控制台</h1>
-    <nav id="nav">
-      <button data-tab="run" class="active">采集执行</button>
-      <button data-tab="sources">来源管理</button>
-      <button data-tab="runs">运行记录</button>
-      <button data-tab="data">数据浏览</button>
-      <button data-tab="export">导出</button>
-    </nav>
-  </header>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="name">🕸️ 采集工作台</div>
+      <div class="sub">本地运行 · 数据仅存本机</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">工作台</div>
+      <button class="nav-item active" data-page="chat">💬 对话助手</button>
+      <button class="nav-item" data-page="run">▶ 采集执行</button>
+      <button class="nav-item" data-page="runs">📋 运行记录</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">数据与运维</div>
+      <button class="nav-item" data-page="sources">🧭 来源管理</button>
+      <button class="nav-item" data-page="data">🔎 数据浏览</button>
+      <button class="nav-item" data-page="export">⬇️ 导出</button>
+    </div>
+    <div class="sidebar-foot">
+      仅采集允许抓取的公开页面；助手只整理计划，执行前需你确认。
+    </div>
+  </aside>
 
-  <main>
-    <!-- 采集执行 -->
-    <section id="tab-run" class="tab active">
-      <div class="card">
-        <h2>立即采集</h2>
-        <p class="hint">输入任意公开网页地址，点击执行；也可以到「来源管理」对已配置的来源一键采集。</p>
-        <form id="run-form">
-          <input id="run-url" type="text" placeholder="https://example.com/article" required>
-          <select id="run-schema"></select>
-          <label class="chk"><input id="run-browser" type="checkbox"> 浏览器渲染（JS 站点）</label>
-          <button type="submit" id="run-btn">▶ 执行采集</button>
+  <main class="main">
+    <!-- 对话助手（默认页） -->
+    <section class="page active" id="page-chat">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">对话助手</h1>
+          <p class="page-desc">用自然语言描述想采集的内容——助手整理成采集计划，经你确认后才会创建并执行。</p>
+        </div>
+      </div>
+      <div class="notice">💡 示例：「帮我每天早上盯一下 HackerNews 首页的技术热点」·「采集 https://… 这篇文章的关键信息」</div>
+      <div class="card chat">
+        <div class="chat-log" id="chat-log">
+          <div class="msg assistant">你好，我是采集助手。告诉我你想<b>采集什么内容、从哪个页面采集、多久采集一次</b>，我会整理成计划给你确认。</div>
+        </div>
+        <form class="composer" id="chat-form">
+          <input type="text" id="chat-input" placeholder="描述你的采集需求…" autocomplete="off" required>
+          <button type="submit" class="btn btn-primary" id="chat-send">发送</button>
         </form>
-        <div id="run-result" class="result hidden"></div>
+      </div>
+      <p class="page-foot">助手只负责整理采集计划，不会自动执行；一切执行都需你点击确认。</p>
+    </section>
+
+    <!-- 采集执行 -->
+    <section class="page" id="page-run">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">采集执行</h1>
+          <p class="page-desc">已知网址时直接执行单次采集；不确定网址怎么配置？去「对话助手」让助手帮你整理。</p>
+        </div>
       </div>
       <div class="card">
-        <h2>今日概览</h2>
-        <div id="summary" class="metrics">加载中…</div>
-        <div id="blocked" class="hint"></div>
+        <form id="run-form" class="form-row">
+          <div class="field" style="flex:1 1 320px">
+            <label for="run-url">页面网址</label>
+            <input id="run-url" type="url" placeholder="https://example.com/article" required>
+          </div>
+          <div class="field">
+            <label for="run-schema">数据类型</label>
+            <select id="run-schema"></select>
+          </div>
+          <div class="field">
+            <label class="chk"><input id="run-browser" type="checkbox"> 浏览器渲染（JS 站点）</label>
+          </div>
+          <button type="submit" class="btn btn-primary" id="run-btn">▶ 执行采集</button>
+        </form>
       </div>
+      <div id="run-result" class="card" style="display:none"></div>
+      <p class="page-foot">重复采集同一页面且内容未变时会被跳过，不产生费用。</p>
     </section>
 
     <!-- 来源管理 -->
-    <section id="tab-sources" class="tab">
+    <section class="page" id="page-sources">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">来源管理</h1>
+          <p class="page-desc">采集来源的增删改与启停；变更在下一个调度周期（30 秒内）自动生效。</p>
+        </div>
+      </div>
       <div class="card">
-        <h2>采集来源</h2>
-        <table id="sources-table" class="data">
+        <h2 class="card-title">已配置来源</h2>
+        <table class="table" id="sources-table">
           <thead><tr>
-            <th>ID</th><th>名称</th><th>URL</th><th>Schema</th><th>间隔</th>
+            <th>名称 / 网址</th><th>数据类型</th><th>采集频率</th>
             <th>状态</th><th>最近结果</th><th>操作</th>
           </tr></thead>
           <tbody></tbody>
         </table>
       </div>
       <div class="card">
-        <h2>新增 / 更新来源</h2>
-        <form id="source-form">
-          <input id="src-url" type="text" placeholder="URL（已存在则更新）" required>
-          <input id="src-name" type="text" placeholder="名称（可选）">
-          <select id="src-schema"></select>
-          <input id="src-interval" type="number" value="3600" min="60" step="60" title="采集间隔（秒）">
-          <label class="chk"><input id="src-browser" type="checkbox"> 浏览器渲染</label>
-          <label class="chk"><input id="src-enabled" type="checkbox" checked> 启用</label>
-          <button type="submit">保存</button>
+        <h2 class="card-title">新增 / 更新来源</h2>
+        <form id="source-form" class="form-row">
+          <div class="field" style="flex:1 1 300px">
+            <label for="src-url">页面网址（已存在则更新）</label>
+            <input id="src-url" type="url" required>
+          </div>
+          <div class="field">
+            <label for="src-name">名称</label>
+            <input id="src-name" type="text">
+          </div>
+          <div class="field">
+            <label for="src-schema">数据类型</label>
+            <select id="src-schema"></select>
+          </div>
+          <div class="field">
+            <label for="src-interval">间隔（秒）</label>
+            <input id="src-interval" type="number" value="3600" min="60" step="60">
+          </div>
+          <div class="field">
+            <label class="chk"><input id="src-browser" type="checkbox"> 浏览器渲染</label>
+          </div>
+          <div class="field">
+            <label class="chk"><input id="src-enabled" type="checkbox" checked> 启用</label>
+          </div>
+          <button type="submit" class="btn btn-primary">保存</button>
         </form>
-        <p class="hint">间隔下限 60 秒；JS 渲染站点勾选「浏览器渲染」（需已安装 playwright）。</p>
       </div>
+      <p class="page-foot">删除有历史台账的来源会被拒绝，请改用「停用」。间隔下限 60 秒。</p>
     </section>
 
     <!-- 运行记录 -->
-    <section id="tab-runs" class="tab">
+    <section class="page" id="page-runs">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">运行记录</h1>
+          <p class="page-desc">每次采集的终态都记台账：成功、跳过（内容未变/无正文）、失败原因一目了然。</p>
+        </div>
+        <button class="btn btn-secondary" id="runs-refresh">刷新</button>
+      </div>
       <div class="card">
-        <h2>运行记录 <button id="runs-refresh" class="mini">刷新</button>
-          <label class="chk"><input id="runs-auto" type="checkbox" checked> 每 15 秒自动刷新</label></h2>
-        <table id="runs-table" class="data">
+        <table class="table" id="runs-table">
           <thead><tr>
-            <th>#</th><th>时间</th><th>状态</th><th>URL</th>
+            <th>#</th><th>时间</th><th>状态</th><th>网址</th>
             <th>供应商</th><th>Token(in/out)</th><th>耗时</th><th>错误</th>
           </tr></thead>
           <tbody></tbody>
         </table>
       </div>
+      <p class="page-foot">记录每 15 秒自动刷新；异常任务的完整原因可从错误列追溯。</p>
     </section>
 
     <!-- 数据浏览 -->
-    <section id="tab-data" class="tab">
+    <section class="page" id="page-data">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">数据浏览</h1>
+          <p class="page-desc">查看已入库的结构化数据，支持按类型和关键词过滤。</p>
+        </div>
+      </div>
       <div class="card">
-        <h2>结构化数据</h2>
-        <form id="data-form">
-          <select id="data-schema"><option value="">（全部）</option></select>
-          <input id="data-keyword" type="text" placeholder="关键词（内容 / URL）">
-          <button type="submit">查询</button>
+        <form id="data-form" class="form-row">
+          <div class="field">
+            <label for="data-schema">数据类型</label>
+            <select id="data-schema"></select>
+          </div>
+          <div class="field" style="flex:1 1 260px">
+            <label for="data-keyword">关键词（内容 / 网址）</label>
+            <input id="data-keyword" type="text">
+          </div>
+          <button type="submit" class="btn btn-primary">查询</button>
         </form>
         <p class="hint" id="data-total"></p>
         <div id="data-list"></div>
@@ -96,21 +176,36 @@
     </section>
 
     <!-- 导出 -->
-    <section id="tab-export" class="tab">
-      <div class="card">
-        <h2>导出数据</h2>
-        <p class="hint">按 Schema 与日期过滤后下载（与「数据浏览」共用过滤条件）。</p>
-        <form id="export-form">
-          <select id="export-schema"><option value="">（全部）</option></select>
-          <input id="export-since" type="date"> 至 <input id="export-until" type="date">
-          <button type="button" data-fmt="csv">下载 CSV</button>
-          <button type="button" data-fmt="json">下载 JSON</button>
-          <button type="button" data-fmt="markdown">下载 Markdown</button>
-        </form>
+    <section class="page" id="page-export">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">导出</h1>
+          <p class="page-desc">按类型与日期过滤后下载结构化数据。</p>
+        </div>
       </div>
+      <div class="card">
+        <div class="form-row" id="export-form">
+          <div class="field">
+            <label for="export-schema">数据类型</label>
+            <select id="export-schema"></select>
+          </div>
+          <div class="field">
+            <label for="export-since">起始日期</label>
+            <input id="export-since" type="date">
+          </div>
+          <div class="field">
+            <label for="export-until">结束日期</label>
+            <input id="export-until" type="date">
+          </div>
+          <button class="btn btn-secondary" data-fmt="csv">下载 CSV</button>
+          <button class="btn btn-secondary" data-fmt="json">下载 JSON</button>
+          <button class="btn btn-secondary" data-fmt="markdown">下载 Markdown</button>
+        </div>
+      </div>
+      <p class="page-foot">数据仅用于运营目的；导出文件请妥善保管。</p>
     </section>
   </main>
-
-  <script src="/static/app.js"></script>
+</div>
+<script src="/static/app.js"></script>
 </body>
 </html>

@@ -1,79 +1,172 @@
+/* Prism 棱镜设计语言：浅色、克制、语义色驱动（~/.zcode/design/DESIGN.md） */
 :root {
-  --bg: #f5f7fa; --card: #fff; --ink: #1f2933; --sub: #6b7280;
-  --accent: #2563eb; --ok: #16a34a; --warn: #d97706; --err: #dc2626;
-  --border: #e5e7eb; --radius: 10px;
+  --bg: #f5f7fa; --surface: #ffffff; --surface-2: #f9fafb; --surface-3: #eef2f6;
+  --text: #17202a; --muted: #5d6b7d; --soft: #8a96a6;
+  --border: #dce3ea; --border-strong: #c2ccd8;
+  --primary: #155e75; --primary-soft: #e2eff3; --primary-ink: #0c3b4a;
+  --primary-hover: #104c60;
+  --teal: #0f766e; --teal-soft: #dff3f0;
+  --green: #156f43; --green-soft: #e5f6ed;
+  --amber: #8f6100; --amber-soft: #fff3cf;
+  --red: #ba3030; --red-soft: #ffe6e6;
+  --radius-sm: 6px; --radius-base: 8px;
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px; line-height: 1.55;
 }
-header {
-  background: var(--card); border-bottom: 1px solid var(--border);
-  padding: 14px 24px; display: flex; align-items: center; gap: 28px;
-  position: sticky; top: 0; z-index: 10;
+
+/* ── 产品外壳：240px 侧边栏 + 主区 ── */
+.shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 240px; flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 18px 12px;
 }
-h1 { font-size: 20px; margin: 0; }
-nav { display: flex; gap: 6px; flex-wrap: wrap; }
-nav button {
-  border: 0; background: transparent; padding: 8px 14px; border-radius: 8px;
-  font-size: 14px; cursor: pointer; color: var(--sub);
+.brand { padding: 2px 10px 14px; border-bottom: 1px solid var(--border); }
+.brand .name { font-size: 15px; font-weight: 600; color: var(--primary-ink); }
+.brand .sub { font-size: 11.5px; color: var(--soft); margin-top: 2px; }
+.nav-group { margin-top: 14px; }
+.nav-group-title {
+  font-size: 11.5px; color: var(--soft); padding: 0 10px 5px;
 }
-nav button.active { background: var(--accent); color: #fff; }
-main { max-width: 1080px; margin: 20px auto; padding: 0 16px; }
-.tab { display: none; }
-.tab.active { display: block; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: transparent; padding: 8px 10px; border-radius: var(--radius-sm);
+  font-size: 14px; color: var(--muted); cursor: pointer;
+}
+.nav-item:hover { background: var(--surface-2); }
+.nav-item.active { background: var(--primary-soft); color: var(--primary-ink);
+  font-weight: 500; }
+.sidebar-foot {
+  margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--soft); line-height: 1.5;
+}
+
+.main { flex: 1; min-width: 0; padding: 22px 28px 48px; }
+.page { display: none; }
+.page.active { display: block; }
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px; margin-bottom: 14px;
+}
+.page-title { font-size: 21px; font-weight: 600; line-height: 1.3; margin: 0; }
+.page-desc { color: var(--muted); margin: 4px 0 0; max-width: 660px; }
+.page-foot {
+  margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--soft);
+}
+
+/* ── 通用组件 ── */
 .card {
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 18px 20px; margin-bottom: 18px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-base); padding: 16px; margin-bottom: 16px;
 }
-h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 12px; }
-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-input, select {
-  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
-  font-size: 14px; background: #fff;
+.card-title { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+.notice {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--primary-soft); border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12.5px;
+  color: var(--primary-ink); margin-bottom: 14px;
 }
-#run-url, #src-url, #data-keyword { flex: 1 1 280px; }
-button[type="submit"], form button[data-fmt], form button {
-  background: var(--accent); color: #fff; border: 0; border-radius: 8px;
-  padding: 8px 16px; font-size: 14px; cursor: pointer;
+.notice.warn { background: var(--amber-soft); border-left-color: var(--amber);
+  color: var(--amber); }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  margin-bottom: 16px; }
+.metric {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-base); padding: 12px 14px;
 }
-form button[data-fmt] { background: #475569; }
-button.mini {
-  background: var(--bg); color: var(--ink); border: 1px solid var(--border);
-  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+.metric .v { font-size: 22px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.metric .k { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-sm);
+  padding: 8px 14px; font-size: 14px; cursor: pointer;
+  border: 1px solid transparent; background: transparent;
 }
-label.chk { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--sub); }
-.hint { color: var(--sub); font-size: 13px; }
-.data { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data th, .data td {
-  text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border);
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-secondary { background: var(--surface); color: var(--text);
+  border-color: var(--border-strong); }
+.btn-danger { background: var(--surface); color: var(--red);
+  border-color: var(--red); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn-mini { padding: 3px 9px; font-size: 12.5px; border-radius: var(--radius-sm); }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12.5px; color: var(--muted); }
+input[type="text"], input[type="url"], input[type="number"], input[type="date"],
+select {
+  padding: 8px 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); font-size: 14px; background: var(--surface);
+  color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--primary-soft);
+  border-color: var(--primary); }
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.table th, .table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
   vertical-align: top; word-break: break-all;
 }
-.data th { color: var(--sub); font-weight: 500; }
-.data tr:hover td { background: #f8fafc; }
+.table th { color: var(--muted); font-weight: 500; }
+.table tr:hover td { background: var(--surface-2); }
+
+/* 状态徽标：圆点前缀 + 文字标签（绝不只用颜色） */
 .badge {
-  display: inline-block; padding: 2px 8px; border-radius: 999px;
-  font-size: 12px; color: #fff; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+  border-radius: 999px; font-size: 12.5px; white-space: nowrap;
 }
-.badge.ok { background: var(--ok); }
-.badge.skip { background: #94a3b8; }
-.badge.warn { background: var(--warn); }
-.badge.err { background: var(--err); }
-.metrics { display: flex; gap: 24px; flex-wrap: wrap; font-size: 14px; }
-.metrics b { font-size: 22px; display: block; }
-.metrics span { color: var(--sub); font-size: 12px; }
-.result { margin-top: 14px; padding: 12px 14px; border-radius: 8px; font-size: 13px; }
-.result.ok { background: #f0fdf4; border: 1px solid #bbf7d0; }
-.result.err { background: #fef2f2; border: 1px solid #fecaca; }
-.hidden { display: none; }
-.row-actions button {
-  margin-right: 4px; padding: 3px 8px; font-size: 12px; border-radius: 6px;
-  border: 1px solid var(--border); background: #fff; cursor: pointer;
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; }
+.badge-ok { background: var(--green-soft); color: var(--green); }
+.badge-skip { background: var(--surface-3); color: var(--muted); }
+.badge-warn { background: var(--amber-soft); color: var(--amber); }
+.badge-err { background: var(--red-soft); color: var(--red); }
+
+/* ── 对话助手 ── */
+.chat { max-width: 780px; }
+.chat-log { display: flex; flex-direction: column; gap: 12px;
+  max-height: 58vh; overflow-y: auto; padding: 2px; margin-bottom: 14px; }
+.msg { max-width: 84%; padding: 10px 12px; border-radius: var(--radius-base); }
+.msg.user { align-self: flex-end; background: var(--primary); color: #fff; }
+.msg.assistant { align-self: flex-start; background: var(--surface);
+  border: 1px solid var(--border); }
+.msg .meta { display: block; font-size: 11.5px; margin-top: 6px; color: var(--soft); }
+.msg.user .meta { color: rgb(255 255 255 / 72%); }
+.thinking { align-self: flex-start; color: var(--soft); font-size: 12.5px; }
+.plan-card {
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-base); padding: 12px; margin-top: 10px;
 }
-.row-actions button.danger { color: var(--err); border-color: #fecaca; }
+.plan-card h3 { font-size: 13px; margin: 0 0 8px; color: var(--primary-ink); }
+.plan-card dl {
+  display: grid; grid-template-columns: 96px 1fr; gap: 4px 10px;
+  margin: 0 0 10px; font-size: 13px;
+}
+.plan-card dt { color: var(--muted); }
+.plan-card dd { margin: 0; word-break: break-all; }
+.plan-actions { display: flex; gap: 8px; }
+.composer { display: flex; gap: 8px; }
+.composer input { flex: 1; }
+
+/* ── 数据浏览 ── */
 details { margin: 8px 0; }
+details summary { cursor: pointer; padding: 8px 10px; border-radius: var(--radius-sm); }
+details summary:hover { background: var(--surface-2); }
 details pre {
-  background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px;
-  font-size: 12px; overflow: auto;
+  background: var(--surface-3); color: var(--text); padding: 10px 12px;
+  border-radius: var(--radius-sm); font-size: 12.5px; overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .shell { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
 }
