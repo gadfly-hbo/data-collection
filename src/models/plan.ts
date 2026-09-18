@@ -14,10 +14,19 @@ export const CollectionPlan = z.object({
 });
 export type CollectionPlan = z.infer<typeof CollectionPlan>;
 
+export const ResearchDraft = z.object({
+  template: z.string().describe("研究模板 id（如 district-research / brand-research / company-research）"),
+  topic: z.string().describe("研究对象（城市·商圈 / 品牌 / 公司）"),
+});
+
 export const PlanReply = z.object({
   reply: z
     .string()
     .describe("给用户的中文回复：信息不齐时只提一个最关键的问题；齐全时是一句确认说明"),
   plan: CollectionPlan.nullable().default(null).describe("信息齐全时的计划草案，否则为 null"),
+  intent: z.enum(["collect", "research"]).default("collect")
+    .describe("需求类型：collect=单页采集（给 plan）；research=研究类（给 research 草稿）"),
+  research: ResearchDraft.nullable().default(null)
+    .describe("intent=research 时的任务草稿；单页采集为 null"),
 });
 export type PlanReply = z.infer<typeof PlanReply>;

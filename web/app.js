@@ -165,6 +165,18 @@ function bindPlanCard(container, plan) {
   }, {once: false});
 }
 
+$("#chat-log").addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-research]");
+  if (!btn) return;
+  const draft = JSON.parse(btn.dataset.research);
+  try {
+    const r = await api("/api/research", { method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ template: draft.template, topic: draft.topic }) });
+    btn.closest(".plan-actions").innerHTML = `<span class="hint">✅ 已创建 #${r.id} —— </span><button class="btn btn-secondary btn-mini" onclick="go(\x27research\x27)">去研究工作台确认 ▸</button>`;
+    refreshOverview && refreshOverview();
+  } catch (e) { alert(`创建失败：${e.message}`); }
+});
+
 $("#chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = $("#chat-input").value.trim();
@@ -189,6 +201,16 @@ $("#chat-form").addEventListener("submit", async (event) => {
     if (data.plan) {
       msg.insertAdjacentHTML("beforeend", planCardHtml(data.plan));
       bindPlanCard(msg, data.plan);
+    } else if (data.intent === "research" && data.research) {
+      msg.insertAdjacentHTML("beforeend", `
+        <div class="plan-card">
+          <h3>研究任务草稿（${esc(data.research.template)}）</h3>
+          <dl><dt>研究对象</dt><dd>${esc(data.research.topic)}</dd>
+              <dt>执行方式</dt><dd>确认后进入研究工作台多节点执行，token 预算默认 25 万</dd></dl>
+          <div class="plan-actions">
+            <button class="btn btn-primary btn-mini" data-research='${esc(JSON.stringify(data.research))}'>➕ 创建并去确认</button>
+          </div>
+        </div>`);
     }
   } catch (e) {
     thinking.remove();
@@ -583,7 +605,37 @@ async function confirmResearch(id) {
   try { await api(`/api/research/jobs/${id}/confirm`, { method: "POST" }); refreshResearchJobs(id); }
   catch (e) { alert(`确认失败：${e.message}`); }
 }
-function toggleNewResearch() { /* 切片4 实现发起表单 */ }
+const TPL_NAME = { "district-research": "商圈研究", "brand-research": "品牌研究", "company-research": "企业研究" };
+let tplCache = null;
+function toggleNewResearch() {
+  const el = $("#new-research");
+  el.style.display = el.style.display === "none" ? "block" : "none";
+  if (el.innerHTML) return;
+  (async () => {
+    tplCache = tplCache ?? await api("/api/research/templates");
+    el.innerHTML = `
+      <h2 class="card-title">新建研究</h2>
+      <div class="form-row">
+        <div class="field"><label>研究类型</label>
+          <select id="nr-template">${tplCache.map((t) => `<option value="${t.id}">${esc(TPL_NAME[t.id] || t.name)}</option>`).join("")}</select></div>
+        <div class="field" style="flex:1 1 260px"><label>研究对象</label>
+          <input id="nr-topic" type="text" placeholder="如：深圳 · 前海商圈 / 瑞幸咖啡"></div>
+        <div class="field"><label>深度（token 预算）</label>
+          <select id="nr-budget"><option value="120000">快速（约 8 分钟）</option><option value="250000" selected>标准（约 20 分钟）</option><option value="500000">深度（约 45 分钟）</option></select></div>
+        <button class="btn btn-primary" id="nr-create">创建草稿</button>
+      </div>
+      <p class="page-desc" style="margin-top:8px">创建后为「待确认」，在下方列表点「确认并开始」才执行——确认前零消耗。</p>`;
+    $("#nr-create").onclick = async () => {
+      try {
+        const r = await api("/api/research", { method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ template: $("#nr-template").value, topic: $("#nr-topic").value.trim(),
+                                 max_input_tokens: Number($("#nr-budget").value) }) });
+        el.style.display = "none";
+        refreshResearchJobs(r.id);
+      } catch (e) { alert(`创建失败：${e.message}`); }
+    };
+  })();
+}
 
 const GRADE_BADGE = { A: "teal", B: "brand", C: "warn" };
 function renderReport(d) {

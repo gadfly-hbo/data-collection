@@ -354,7 +354,8 @@ export function createApp(
       if (reply.plan && !SCHEMA_REGISTRY[reply.plan.schema_type]) {
         reply.plan.schema_type = Object.keys(SCHEMA_REGISTRY).sort()[0]; // 兜底到首个注册类型
       }
-      res.json({ reply: reply.reply, plan: reply.plan });
+      res.json({ reply: reply.reply, plan: reply.plan,
+                 intent: reply.intent ?? "collect", research: reply.research });
     } catch (e) {
       if (e instanceof TransientProviderError) {
         return res.status(503).json({ detail: "LLM 供应商暂时不可用（配额或限流），请稍后重试" });
