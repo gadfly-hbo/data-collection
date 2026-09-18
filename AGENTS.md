@@ -16,6 +16,7 @@
 - 导出数据：`python scripts/export_data.py --format json`（csv / markdown 可选）
 - 监控面板：`streamlit run scripts/dashboard.py`（需 `pip install -r requirements-ui.txt`）
 - 一键检查：`scripts/check.sh`（装依赖 + 测试 + 覆盖率）
+- 双端同步：`scripts/sync_peer.sh`（push + 对端 SSH `pull --ff-only`；mini↔MacBook，改动后必跑）
 - 测试：`pytest`（默认跳过 live 用例；设好 Key 后用 `pytest -m live` 运行真实 API 冒烟）
 
 ## 硬性规则

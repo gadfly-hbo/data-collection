@@ -128,6 +128,15 @@ SELECT * FROM crawl_runs WHERE url LIKE '%en.wikipedia.org%' ORDER BY id DESC;
 | `API key not valid` | `.env` 的 Key 无效或未生效；修正后重启进程 |
 | MiniMax 的 input_tokens 显示 1 | 该端点上报不准（已知问题）；预算以任务数上限为主防线 |
 
+## 双端开发同步（Mac mini ↔ MacBook）
+
+仓库位置：mini `~/DevWorkSpace/Projects/data-collection`；MacBook `~/Dev/Projects/data-collection`。远端为 GitHub `origin`。
+
+**工作流**：在哪端改的就在哪端 `git commit`，然后运行 `scripts/sync_peer.sh`——先 `git push`，再经 SSH 让对端 `git pull --ff-only`（对端有本地未推送改动时会报错中止，手动先合并，防止覆盖）。对端 SSH 别名：mini 端为 `macbook`，MacBook 端为 `myhost`（见各自 `~/.ssh/config`）。
+
+> `.env` 不进 git，换端或重装时需单独复制（mini→MacBook 示例）：
+> `scp .env macbook:/Users/huangbo/Dev/Projects/data-collection/.env`
+
 ## 开发与测试
 
 ```bash
