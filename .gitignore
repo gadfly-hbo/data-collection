@@ -20,3 +20,6 @@ data/
 
 # macOS
 .DS_Store
+
+# dev-flow 本机状态（durable artifacts 提交，state.json 本地）
+.flow/state.json
