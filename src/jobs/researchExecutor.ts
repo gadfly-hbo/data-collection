@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { JobStatus } from "../status.ts";
 import { initialState, validateTemplate, WorkflowEngine, type NodeRunner, type WorkflowState } from "../research/engine.ts";
+import { assertSearchToolsAvailable, type PrecheckResult } from "../research/mcpPrecheck.ts";
 import { RESEARCH_TEMPLATES } from "../research/templates/index.ts";
 import type { Database } from "../storage/db.ts";
 import type { JobContext, JobExecutor, JobResult, JobRow } from "./kernel.ts";
@@ -15,12 +16,26 @@ const ResearchPayload = z.object({
   maxInputTokens: z.number().int().positive().optional(),
 });
 
+/** 报告质量终检：证据标记与主题相关性——防「机制跑通但内容跑题」 */
+export function reportQualityGate(report: string, topic: string): string | null {
+  const evidence = (report.match(/【等级\s*[ABC]】/g) ?? []).length;
+  if (evidence < 6) return `证据标记不足（【等级 A/B/C】共 ${evidence} 条，要求 ≥6）`;
+  const topicTokens = topic.split(/[·\s，,、]+/).filter((t) => t.length >= 2);
+  if (topicTokens.length > 0 && !topicTokens.some((t) => report.includes(t))) {
+    return `报告未命中研究对象关键词（${topicTokens.join("/") || topic}）`;
+  }
+  return null; // 通过
+}
+
 export class ResearchExecutor implements JobExecutor {
   readonly type = "research";
   private readonly makeRunner: () => NodeRunner;
+  private readonly precheck: () => Promise<PrecheckResult>;
 
-  constructor(makeRunner: () => NodeRunner) {
+  constructor(makeRunner: () => NodeRunner,
+              opts: { precheck?: () => Promise<PrecheckResult> } = {}) {
     this.makeRunner = makeRunner;
+    this.precheck = opts.precheck ?? (() => assertSearchToolsAvailable());
   }
 
   async run(job: JobRow, ctx: JobContext): Promise<JobResult> {
@@ -38,6 +53,13 @@ export class ResearchExecutor implements JobExecutor {
       validateTemplate(template);
     } catch (e) {
       return { status: JobStatus.FAILED, error: String(e) };
+    }
+
+    // 前置条件：检索工具可用（预检失败 → 零消耗暂停，不进入会话降级编证）
+    const check = await this.precheck();
+    if (!check.ok) {
+      return { status: JobStatus.PAUSED,
+               error: `检索工具预检失败：${check.error}（工具就绪后重新确认即可续跑）` };
     }
 
     // 续跑起点：最近一次带快照的 job_run（含 paused/failed/completed）
@@ -61,6 +83,14 @@ export class ResearchExecutor implements JobExecutor {
     const nodeState = JSON.stringify(result.state);
 
     if (result.completed && result.report) {
+      const quality = reportQualityGate(result.report, payload.topic);
+      if (quality) {
+        return {
+          status: JobStatus.PAUSED,
+          inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+          error: `报告质量终检未通过：${quality}`, nodeState,
+        };
+      }
       if (ctx.jobRunId != null) {
         ctx.db.insertArtifact({
           jobRunId: ctx.jobRunId, kind: "report",

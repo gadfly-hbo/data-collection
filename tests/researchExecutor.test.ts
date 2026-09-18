@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { CustomExecutor } from "../src/jobs/customExecutor.ts";
 import type { JobRow } from "../src/jobs/kernel.ts";
-import { ResearchExecutor } from "../src/jobs/researchExecutor.ts";
+import { reportQualityGate, ResearchExecutor } from "../src/jobs/researchExecutor.ts";
 import { initialState } from "../src/research/engine.ts";
 import { RESEARCH_TEMPLATES } from "../src/research/templates/index.ts";
 import { JobStatus } from "../src/status.ts";
@@ -47,12 +47,12 @@ describe("jobs/researchExecutor", () => {
     // 简化：以全节点通用 script（文本按序）
     const seqRunner = (() => {
       let i = 0;
-      const outs = ["PLAN", "EVIDENCE[A1.1] web_search 取证完成", "# 报告", "PASS"];
+      const outs = ["PLAN", "EVIDENCE[A1.1] web_search 取证完成 '# 前海商圈报告 【等级 A】【等级 B】【等级 A】【等级 B】【等级 C】【等级 A】'", '# 前海商圈报告 【等级 A】【等级 B】【等级 A】【等级 B】【等级 C】【等级 A】', "PASS"];
       const seen: string[] = [];
       return { seen, make: async () => ({ text: outs[Math.min(i++, 3)], usedTools: ["minimax_web_search"], inputTokens: 200, outputTokens: 20 }) };
     })();
     void runner;
-    const exec = new ResearchExecutor(() => seqRunner.make);
+    const exec = new ResearchExecutor(() => seqRunner.make, { precheck: async () => ({ ok: true, tools: ["web_search"] }) });
     const result = await exec.run(jobRow({ template: tpl, topic: "前海商圈" }), { db, jobRunId: runId });
 
     expect(result.status).toBe(JobStatus.SUCCESS);
@@ -69,7 +69,7 @@ describe("jobs/researchExecutor", () => {
     const db = new Database(":memory:");
     const jobId = db.insertJob({ type: "research", name: "r" });
     const runId = db.insertJobRun({ jobId, status: "running" });
-    const exec = new ResearchExecutor(() => async () => ({ text: "编造", usedTools: [], inputTokens: 0, outputTokens: 0 }));
+    const exec = new ResearchExecutor(() => async () => ({ text: "编造", usedTools: [], inputTokens: 0, outputTokens: 0 }), { precheck: async () => ({ ok: true, tools: ["web_search"] }) });
     const result = await exec.run(jobRow({ template: tpl, topic: "x" }), { db, jobRunId: runId });
     expect(result.status).toBe(JobStatus.PAUSED);
     expect(result.error).toContain("检索证据");
@@ -88,10 +88,10 @@ describe("jobs/researchExecutor", () => {
     void oldRun;
     const runId = db.insertJobRun({ jobId, status: "running" });
     const seenPrompts: string[] = [];
-    const exec = new ResearchExecutor(() => async (p) => {
+    const exec = new ResearchExecutor(() => async (p: string) => {
       seenPrompts.push(p);
-      return { text: "x", usedTools: ["minimax_web_search"], inputTokens: 0, outputTokens: 0 };
-    });
+      return { text: p.includes("基于以下证据") ? '# 前海商圈报告 【等级 A】【等级 B】【等级 A】【等级 B】【等级 C】【等级 A】' : "x", usedTools: ["minimax_web_search"], inputTokens: 0, outputTokens: 0 };
+    }, { precheck: async () => ({ ok: true, tools: ["web_search"] }) });
     const result = await exec.run(jobRow({ template: tpl, topic: "x" }), { db, jobRunId: runId });
     expect(result.status).toBe(JobStatus.SUCCESS);
     expect(seenPrompts.some((p) => p.includes("PLAN") || p.includes("旧计划"))).toBe(true); // 快照变量注入
@@ -106,5 +106,29 @@ describe("jobs/researchExecutor", () => {
     expect((await exec.run(jobRow({ nope: 1 }), ctx)).status).toBe(JobStatus.FAILED);
     expect((await exec.run(jobRow({ template: "ghost", topic: "ab" }), ctx)).status).toBe(JobStatus.FAILED);
     db.close();
+  });
+});
+
+describe("researchExecutor：预检与质量终检", () => {
+  it("预检失败 → paused 且零 token 消耗、不进会话", async () => {
+    const db = new Database(":memory:");
+    const jobId = db.insertJob({ type: "research", name: "r" });
+    const runId = db.insertJobRun({ jobId, status: "running" });
+    let runnerCalls = 0;
+    const exec = new ResearchExecutor(() => async () => { runnerCalls++; return { text: "x", usedTools: [] }; },
+      { precheck: async () => ({ ok: false, tools: [], error: "MCP 未暴露 web_search" }) });
+    const r = await exec.run(jobRow({ template: "district-research", topic: "x" }), { db, jobRunId: runId });
+    expect(r.status).toBe(JobStatus.PAUSED);
+    expect(r.error).toContain("预检失败");
+    expect(runnerCalls).toBe(0);
+    db.close();
+  });
+
+  it("报告质量终检：证据不足/跑题 → paused；达标 → report artifact", async () => {
+    expect(reportQualityGate("正文 前海 商圈", "深圳·前海商圈")).toContain("证据标记不足");
+    const good = ["【等级 A】", "【等级 B】", "【等级 A】", "【等级 B】", "【等级 C】", "【等级 A】"]
+      .map((g, i) => `[A${i}] 【来源${i}】 ${g} 行业事实。来源：https://x/${i}]`).join("\n");
+    expect(reportQualityGate(`# 前海商圈\n${good}`, "深圳·前海商圈")).toBeNull();
+    expect(reportQualityGate(`# 无关主题\n${good}`, "深圳·前海商圈")).toContain("未命中");
   });
 });

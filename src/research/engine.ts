@@ -101,12 +101,15 @@ export class WorkflowEngine {
   /** Token 预算（超出→暂停，可续跑时另行决策） */
   private readonly maxInputTokens: number;
 
+  private readonly nodeRetries: number;
+
   constructor(template: ResearchTemplate, runner: NodeRunner, task: string,
-              maxInputTokens = Infinity) {
+              maxInputTokens = Infinity, nodeRetries = 2) {
     this.template = template;
     this.runner = runner;
     this.task = task;
     this.maxInputTokens = maxInputTokens;
+    this.nodeRetries = Math.max(1, nodeRetries);
   }
 
   /** 从快照续跑：pending/skipped 节点重新评估，done 直接跳过。 */
@@ -133,6 +136,9 @@ export class WorkflowEngine {
       }
 
       const prompt = substitute(node.prompt, this.task, state);
+      // 节点级重试：MCP/会话偶发初始化竞态不再一击即暂停
+      let attemptError: unknown = null;
+      for (let attempt = 1; attempt <= this.nodeRetries; attempt++) {
       try {
         const r = await this.runner(prompt);
         if (node.requireSearch && !r.usedTools.some((t) => /search/i.test(t))) {
@@ -153,9 +159,15 @@ export class WorkflowEngine {
           return { completed: false, paused: true, state, report: null,
                    inputTokens, outputTokens, error: "超出 token 预算" };
         }
+        break; // 节点成功：跳出重试循环
       } catch (e) {
+        attemptError = e;
+        if (attempt < this.nodeRetries) continue;
+      }
+      }
+      if (st.status !== "done") { // 重试穷尽仍失败
         st.status = "failed";
-        st.error = `${e}`;
+        st.error = `${attemptError}`;
         return { completed: false, paused: true, state, report: null,
                  inputTokens, outputTokens, error: st.error };
       }

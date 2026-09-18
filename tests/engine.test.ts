@@ -95,6 +95,27 @@ describe("research/engine：工作流引擎", () => {
   });
 });
 
+describe("research/engine：节点重试", () => {
+  it("瞬时失败自动重试：第一次抛错第二次成功", async () => {
+    let calls = 0;
+    const runner: NodeRunner = async () => {
+      calls++;
+      if (calls === 1) throw new Error("MCP not initialized");
+      return { text: "ok", usedTools: ["minimax_web_search"], inputTokens: 1, outputTokens: 1 };
+    };
+    const res = await new WorkflowEngine(miniTemplate(), runner, "x").run(initialState(miniTemplate()));
+    expect(res.completed).toBe(true); // 5 节点全成功（plan/research/write 各至少一次）
+  });
+
+  it("重试穷尽才 paused", async () => {
+    let calls = 0;
+    const runner: NodeRunner = async () => { calls++; throw new Error("always down"); };
+    const res = await new WorkflowEngine(miniTemplate(), runner, "x").run(initialState(miniTemplate()));
+    expect(res.paused).toBe(true);
+    expect(calls).toBe(2); // nodeRetries 默认 2
+  });
+});
+
 describe("research/engine：模板校验", () => {
   it("gate 引用不存在 → 报错", () => {
     const bad = miniTemplate();
