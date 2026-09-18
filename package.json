@@ -39,5 +39,9 @@
   },
   "optionalDependencies": {
     "playwright": "^1.52.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "playwright@1.63.0": true
   }
 }
