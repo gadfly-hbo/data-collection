@@ -16,4 +16,4 @@ fi
 
 git push
 ssh -o BatchMode=yes "$PEER_SSH" "cd '$PEER_DIR' && git pull --ff-only"
-echo "✅ 对端已同步：$PEER_SSH（$PEER_DIR）"
+echo "✅ 对端已同步：${PEER_SSH}（${PEER_DIR}）"
