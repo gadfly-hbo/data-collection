@@ -290,3 +290,36 @@ describe("webapp：connector 端点", () => {
     db.close();
   });
 });
+
+describe("webapp：研究任务端点", () => {
+  it("模板列表 / 创建待确认 / 确认激活 / 详情", async () => {
+    const db = new Database(":memory:");
+    await withApp(db, {}, async (base) => {
+      const tpls = await (await fetch(`${base}/api/research/templates`)).json();
+      expect(tpls.map((t: { id: string }) => t.id)).toContain("district-research");
+
+      const created = await (await fetch(`${base}/api/research`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template: "district-research", topic: "深圳前海商圈" }),
+      })).json();
+      expect(created.status).toBe("pending_confirmation");
+      expect((db.getJob(created.id) as { enabled: number }).enabled).toBe(0); // 未确认不进调度
+
+      expect((await fetch(`${base}/api/research`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template: "ghost", topic: "x" })})).status).toBe(400);
+
+      const confirmed = await fetch(`${base}/api/research/jobs/${created.id}/confirm`, { method: "POST" });
+      expect((await confirmed.json()).ok).toBe(true);
+      expect((db.getJob(created.id) as { enabled: number }).enabled).toBe(1);
+
+      const detail = await (await fetch(`${base}/api/research/jobs/${created.id}`)).json();
+      expect(detail.job.type).toBe("research");
+      expect(detail.report).toBeNull();
+
+      const jobs = await (await fetch(`${base}/api/research/jobs`)).json();
+      expect(jobs.some((j: { id: number }) => j.id === created.id)).toBe(true);
+    });
+    db.close();
+  });
+});

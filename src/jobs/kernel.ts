@@ -41,6 +41,8 @@ export interface JobResult {
 
 export interface JobContext {
   db: Database;
+  /** 当前 job_runs 行 id（内核创建 running 行后注入；执行器写 artifact/快照用） */
+  jobRunId?: number;
   /** 事件回调（BLOCKED / 异常告警等，由 daemon 注入通知能力） */
   onEvent?: (kind: "blocked" | "error", message: string) => void;
 }
@@ -96,8 +98,9 @@ export class JobKernel {
       }
     }
     const runId = this.db.insertJobRun({ jobId: job.id, status: JobStatus.RUNNING });
+    const runCtx: JobContext = { ...ctx, jobRunId: runId };
     try {
-      const result = await executor.run(job, ctx);
+      const result = await executor.run(job, runCtx);
       this.db.updateJobRun(runId, result);
       return result;
     } catch (e) {

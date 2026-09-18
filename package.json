@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run --config vitest.live.config.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && ! grep -rEn 'constructor\\((private|public|protected) |constructor\\([^)]*readonly ' src/ scripts/ --include='*.ts' || (echo 'node strip-only 模式不支持构造参数属性' && false)",
     "run-once": "node scripts/run-once.ts",
     "run-daemon": "node scripts/run-daemon.ts",
     "export": "node scripts/export-data.ts",

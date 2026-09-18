@@ -14,6 +14,7 @@ import { isOkOutcome, type RunOutcome } from "../src/pipeline.ts";
 import { JobStatus } from "../src/status.ts";
 import { SCHEMA_REGISTRY } from "../src/models/schemas.ts";
 import { CONNECTOR_REGISTRY, getConnector } from "../src/connectors/registry.ts";
+import { listTemplates, RESEARCH_TEMPLATES } from "../src/research/templates/index.ts";
 
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
@@ -111,6 +112,58 @@ export function createApp(
       res.status(400).json({ detail: e instanceof Error ? e.message : String(e) });
     }
   });
+
+  // ---- 研究任务（Phase 9）：创建=待确认（不启用），确认/续跑才进调度执行 ----
+  app.get("/api/research/templates", (_req, res) => res.json(listTemplates()));
+
+  app.post("/api/research", (req, res) => {
+    const body = req.body ?? {};
+    if (!RESEARCH_TEMPLATES[String(body.template ?? "")]) {
+      return res.status(400).json({ detail: `未知研究模板: ${body.template}` });
+    }
+    const topic = String(body.topic ?? "").trim();
+    if (topic.length < 2) return res.status(400).json({ detail: "研究对象过短" });
+    const jobId = db.insertJob({
+      type: "research", name: `${RESEARCH_TEMPLATES[String(body.template)].name}：${topic}`,
+      payload: JSON.stringify({ template: body.template, topic,
+                                maxInputTokens: body.max_input_tokens ?? undefined }),
+      schedule: JSON.stringify({ kind: "interval", interval_s: 86400 }),
+      enabled: false, // 计划确认前不进调度（执行确认边界）
+    });
+    res.json({ ok: true, id: jobId, status: "pending_confirmation" });
+  });
+
+  app.get("/api/research/jobs", (_req, res) => {
+    res.json(db.conn.prepare(
+      `SELECT j.*,
+         (SELECT r.status FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_status,
+         (SELECT r.error FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_error,
+         (SELECT r.node_state FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_state
+       FROM jobs j WHERE j.type = 'research' ORDER BY j.id`).all());
+  });
+
+  app.get("/api/research/jobs/:id", (req, res) => {
+    const job = db.getJob(Number(req.params.id));
+    if (!job || job.type !== "research") return res.status(404).json({ detail: "研究任务不存在" });
+    const run = db.conn.prepare(
+      "SELECT id, status, node_state, input_tokens, output_tokens, error, finished_at FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT 1")
+      .get(Number(job.id)) as Record<string, unknown> | undefined;
+    const report = db.conn.prepare(
+      `SELECT a.content FROM artifacts a JOIN job_runs r ON a.job_run_id = r.id
+       WHERE r.job_id = ? AND a.kind = 'report' ORDER BY a.id DESC LIMIT 1`)
+      .get(Number(job.id)) as { content: string } | undefined;
+    res.json({ job, run: run ?? null, report: report?.content ?? null });
+  });
+
+  const researchActivate = (id: number, res: import("express").Response) => {
+    const job = db.getJob(id);
+    if (!job || job.type !== "research") return res.status(404).json({ detail: "研究任务不存在" });
+    db.setJobEnabled(id, true);
+    res.json({ ok: true, running: true });
+    return undefined;
+  };
+  app.post("/api/research/jobs/:id/confirm", (req, res) => researchActivate(Number(req.params.id), res));
+  app.post("/api/research/jobs/:id/resume", (req, res) => researchActivate(Number(req.params.id), res));
 
   app.get("/api/connectors", (_req, res) => {
     res.json(Object.values(CONNECTOR_REGISTRY).map((c) => {

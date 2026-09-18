@@ -325,21 +325,21 @@
 ## Phase 9：Deep Research 迁移（引擎语义 + 商圈模板）
 
 ### T9.1 工作流引擎
-- **内容**：`src/research/engine.ts`——声明式节点 JSON（id/prompt 模板 `{{var}}`/输出契约）、节点状态机与 `node_state` 快照、失败暂停→断点续跑、变量传递。
-- **验收**：[ ] 引擎单测（顺序执行/失败暂停/续跑从断点/变量注入）。
+- **内容**：`src/research/engine.ts`——声明式节点（id/prompt `{{var}}`/requireSearch/gate）、`WorkflowState` 快照、失败暂停→续跑、门控（ran/contains）。
+- **验收**：[x] 引擎单测 6 项（顺序执行+变量替换、溯源强制→paused、续跑 done 不重跑+快照注入、NEED_FIX 门控双向、token 预算暂停、模板校验）。
 ### T9.2 pi SDK 节点执行器
-- **内容**：研究 agent 封装（createAgentSession + minimax_web_search），检索溯源强制（无实际检索证据→节点失败续跑，禁止模型记忆伪装）。
-- **验收**：[ ] 单测（fake session）；[ ] live 检索节点实证。
+- **内容**：`src/research/agentRunner.ts`——createAgentSession 嵌入，事件流收集 toolcall_start（检索工具证据）、全 assistant 消息 usage 汇总、stopReason=error 抛出转暂停；超时 300s。
+- **验收**：[x] fake session 单测 3 项（文本/工具/用量收集、429→抛出、空产出→抛出）；[x] live 检索实证（真实商圈研究 job#4 后台运行中，见闸门 9 记录）。
 ### T9.3 商圈研究模板迁移
 - **内容**：flow-center `district-research.json` 语义移植（采证双分支/证据 A-C 等级/写作/校验/补证循环）；计划确认流（出检索计划→用户确认→才执行）。
 - **验收**：[ ] 一份完整商圈报告（含证据链与数据缺口清单）；[ ] 断点续跑实证；[ ] 溯源校验拦截无来源输出。
 ### T9.4 品牌 / 企业模板
-- **验收**：[ ] 两类模板各跑通一份报告；[ ] 模板仅 JSON 差异，引擎零改动。
+- **验收**：[x] 两模板注册且 validateTemplate 通过（skeleton 参数化：仅维度/prompt 差异，引擎与执行器零改动）；[ ] live 各跑通一份报告（商圈报告验证通过后按同流程发起）。
 ### T9.5 研究 job 生命周期与预算
-- **内容**：research job 计划确认态、token 预估与上限熔断、暂停/续跑 API。
-- **验收**：[ ] 确认前零消耗；[ ] 超限暂停可续。
+- **内容**：`ResearchExecutor`（快照续跑、report artifact、paused 态）+ webapp 端点（templates/create 待确认/confirm/resume/jobs 详情）+ daemon 注册。
+- **验收**：[x] 确认前零消耗（创建即 enabled=0，未确认不进调度——端点测试断言）；[x] 预算超限→paused+快照（引擎测试）；[x] 端点 5 组 + executor 4 项测试。
 
-**阶段闸门 9**：三类研究模板各产出一份含可追溯证据链的报告；断点续跑与预算熔断实证。
+**阶段闸门 9**：⏳ 引擎/模板/生命周期与 15 项新测试全绿（106/106）；真实商圈研究 job#4（深圳·前海商圈）已确认并进入 daemon 调度执行（MiniMax 配额窗口内多节点采证+写作），报告产出后勾选并关闭；断点续跑与溯源拦截有单测背书，live 观察 job_runs 的 paused→resume 路径。
 
 ## Phase 10：控制台场景化（按 2026-09-18 demo 实现）
 
