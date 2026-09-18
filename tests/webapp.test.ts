@@ -2,20 +2,38 @@ import type { Server } from "node:http";
 import { describe, expect, it } from "vitest";
 
 import { PlanReply } from "../src/models/plan.ts";
+import { type RunOutcome } from "../src/pipeline.ts";
 import { RunStatus } from "../src/status.ts";
-import type { RunOutcome } from "../src/pipeline.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
 import { Database } from "../src/storage/db.ts";
 import { createApp } from "../scripts/webapp.ts";
 import type { DaemonContext } from "../scripts/run-daemon.ts";
-import { FakeProvider, fakeResult, validNewsItem } from "./helpers.ts";
+import { JobKernel } from "../src/jobs/kernel.ts";
+import { FakeProvider, fakeResult } from "./helpers.ts";
 
-async function withApp(db: Database, pipeline: unknown, fn: (base: string) => Promise<void>, discover?: (t: string) => Promise<unknown>): Promise<void> {
+function okOutcome(url = "https://a.example/1"): RunOutcome {
+  return {
+    status: RunStatus.SUCCESS, url, inputTokens: 1, outputTokens: 1,
+    provider: "fake", model: "m", durationMs: 1,
+  };
+}
+
+interface Deps {
+  pipeline?: unknown;
+  kernel?: JobKernel;
+  discover?: (topic: string) => Promise<unknown>;
+}
+
+async function withApp(db: Database, deps: Deps, fn: (base: string) => Promise<void>): Promise<void> {
   const ctx = {
-    pipeline, fetcher: null, budget: null, busy: Promise.resolve(),
-    lastRun: new Map(), tickS: 30, notifyEnabled: false, clock: () => Date.now(),
+    kernel: deps.kernel ?? new JobKernel(db, {}),
+    pipeline: deps.pipeline ?? { run: async () => okOutcome() },
+    fetcher: null,
+    db,
+    notifyEnabled: false,
+    tickS: 30,
   } as never as DaemonContext;
-  const app = createApp(ctx, db, { withScheduler: false, discover });
+  const app = createApp(ctx, db, { withScheduler: false, discover: deps.discover });
   const server: Server = app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", r));
   const address = server.address();
@@ -42,19 +60,18 @@ function seededDb(): Database {
 describe("webapp：Web 控制台 API", () => {
   it("首页与静态资源可访问", async () => {
     const db = seededDb();
-    await withApp(db, { run: async () => okOutcome() }, async (base) => {
+    await withApp(db, {}, async (base) => {
       const html = await (await fetch(`${base}/`)).text();
       expect(html).toContain("棱镜采集工作台");
       expect(html).toContain("对话助手");
-      const js = await fetch(`${base}/app.js`);
-      expect(js.status).toBe(200);
+      expect((await fetch(`${base}/app.js`)).status).toBe(200);
     });
     db.close();
   });
 
   it("schemas/summary/sources/runs/items/export 端点", async () => {
     const db = seededDb();
-    await withApp(db, { run: async () => okOutcome() }, async (base) => {
+    await withApp(db, {}, async (base) => {
       const schemas = await (await fetch(`${base}/api/schemas`)).json();
       expect(Object.keys(schemas).sort()).toEqual(["CompetitorEvent", "NewsItem"]);
       expect(schemas.NewsItem.fields.title).toBeTruthy();
@@ -83,7 +100,7 @@ describe("webapp：Web 控制台 API", () => {
 
   it("来源 CRUD：合法新增、非法拒绝、同 URL 更新、删除保护", async () => {
     const db = seededDb();
-    await withApp(db, { run: async () => okOutcome() }, async (base) => {
+    await withApp(db, {}, async (base) => {
       const post = (body: unknown) => fetch(`${base}/api/sources`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -94,7 +111,6 @@ describe("webapp：Web 控制台 API", () => {
       const sources = await (await fetch(`${base}/api/sources`)).json();
       expect(sources.length).toBe(2);
 
-      // 有台账的来源删除 → 409；不存在 → 404
       const withRuns = sources.find((s: { name: string }) => s.name === "A");
       const del = await fetch(`${base}/api/sources/${withRuns.id}`, { method: "DELETE" });
       expect(del.status).toBe(409);
@@ -103,29 +119,35 @@ describe("webapp：Web 控制台 API", () => {
     db.close();
   });
 
-  it("立即采集：source_id 与 ad-hoc URL；非法 schema 拒绝", async () => {
+  it("立即采集：source_id 走内核（detail 透传）；ad-hoc 走 pipeline；非法 schema 拒绝", async () => {
     const db = seededDb();
-    const seen: { url: string; sourceId?: number | null }[] = [];
+    const pipelineCalls: { url: string }[] = [];
     const pipeline = {
-      run: async (t: { url: string; sourceId?: number | null }) => {
-        seen.push(t);
-        return okOutcome(t.url);
-      },
+      run: async (t: { url: string }) => { pipelineCalls.push(t); return okOutcome(t.url); },
     };
-    await withApp(db, pipeline, async (base) => {
+    const kernel = new JobKernel(db, {
+      source: {
+        type: "source",
+        async run() {
+          return { status: "success" as const, inputTokens: 7, outputTokens: 3, detail: { ...okOutcome(), runId: 42 } };
+        },
+      },
+    });
+    await withApp(db, { pipeline, kernel }, async (base) => {
       const byId = await fetch(`${base}/api/run`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_id: 1 }),
       });
-      expect((await byId.json()).ok).toBe(true);
-      expect(seen[0].sourceId).toBe(1);
+      const body = await byId.json();
+      expect(body.ok).toBe(true);
+      expect(body.run_id).toBe(42); // detail 透传 RunOutcome 契约
 
       const adhoc = await fetch(`${base}/api/run`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: "https://ad.example/x" }),
       });
       expect((await adhoc.json()).ok).toBe(true);
-      expect(seen[1].sourceId).toBeNull();
+      expect(pipelineCalls.map((c) => c.url)).toEqual(["https://ad.example/x"]); // ad-hoc 走 pipeline
 
       const bad = await fetch(`${base}/api/run`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -146,7 +168,7 @@ describe("webapp：Web 控制台 API", () => {
       run: async () => okOutcome(),
       provider: new FakeProvider([fakeResult(replyWithPlan)]),
     };
-    await withApp(db, pipeline, async (base) => {
+    await withApp(db, { pipeline }, async (base) => {
       const resp = await fetch(`${base}/api/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ history: [{ role: "user", content: "帮我每小时盯 HN" }] }),
@@ -162,10 +184,9 @@ describe("webapp：Web 控制台 API", () => {
     });
     db.close();
 
-    // 供应商不可用 → 503
     const db2 = new Database(":memory:");
     const failing = { run: async () => okOutcome(), provider: new FakeProvider([new TransientProviderError("429 上限")]) };
-    await withApp(db2, failing, async (base) => {
+    await withApp(db2, { pipeline: failing }, async (base) => {
       const resp = await fetch(`${base}/api/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ history: [{ role: "user", content: "采集点新闻" }] }),
@@ -179,7 +200,7 @@ describe("webapp：Web 控制台 API", () => {
   it("来源发现：/api/discover 返回候选；未启用返回 501", async () => {
     const db = seededDb();
     const discover = async () => [{ name: "HN", url: "https://news.ycombinator.com", reason: "r", schema_type: "NewsItem" }];
-    await withApp(db, { run: async () => okOutcome() }, async (base) => {
+    await withApp(db, { discover }, async (base) => {
       const resp = await fetch(`${base}/api/discover`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic: "技术热点" }),
@@ -191,11 +212,11 @@ describe("webapp：Web 控制台 API", () => {
       expect((await fetch(`${base}/api/discover`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
       })).status).toBe(422);
-    }, discover);
+    });
     db.close();
 
     const db2 = new Database(":memory:");
-    await withApp(db2, { run: async () => okOutcome() }, async (base) => {
+    await withApp(db2, {}, async (base) => {
       const resp = await fetch(`${base}/api/discover`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic: "x" }),
@@ -205,10 +226,3 @@ describe("webapp：Web 控制台 API", () => {
     db2.close();
   });
 });
-
-function okOutcome(url = "https://a.example/1"): RunOutcome {
-  return {
-    status: RunStatus.SUCCESS, url, inputTokens: 1, outputTokens: 1,
-    provider: "fake", model: "m", durationMs: 1,
-  };
-}

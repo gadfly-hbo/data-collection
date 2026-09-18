@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>棱镜采集工作台 · 重构 Demo</title>
+<style>
+/* ===== Prism 棱镜设计语言（与 web/style.css 同源，demo 自包含） ===== */
+:root {
+  --bg:#f5f7fa; --surface:#fff; --surface-2:#f9fafb; --surface-3:#eef2f6;
+  --text:#17202a; --muted:#5d6b7d; --soft:#8a96a6;
+  --border:#dce3ea; --border-strong:#c2ccd8;
+  --primary:#155e75; --primary-soft:#e2eff3; --primary-ink:#0c3b4a; --primary-hover:#104c60;
+  --teal:#0f766e; --teal-soft:#dff3f0;
+  --green:#156f43; --green-soft:#e5f6ed;
+  --amber:#8f6100; --amber-soft:#fff3cf;
+  --red:#ba3030; --red-soft:#ffe6e6;
+  --violet:#6d4fc2; --violet-soft:#efebfb;
+  --radius-sm:6px; --radius-base:8px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:Inter,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",ui-sans-serif,system-ui,sans-serif;
+  font-size:14px;line-height:1.55}
+.shell{display:flex;min-height:100vh}
+/* 侧边栏 */
+.sidebar{width:240px;flex-shrink:0;position:sticky;top:0;height:100vh;background:var(--surface);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 12px}
+.brand{padding:2px 10px 14px;border-bottom:1px solid var(--border)}
+.brand .name{font-size:15px;font-weight:600;color:var(--primary-ink)}
+.brand .sub{font-size:11.5px;color:var(--soft);margin-top:2px}
+.nav-group{margin-top:14px}
+.nav-group-title{font-size:11.5px;color:var(--soft);padding:0 10px 5px}
+.nav-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:transparent;
+  padding:8px 10px;border-radius:var(--radius-sm);font-size:14px;color:var(--muted);cursor:pointer}
+.nav-item:hover{background:var(--surface-2)}
+.nav-item.active{background:var(--primary-soft);color:var(--primary-ink);font-weight:500}
+.nav-item .count{margin-left:auto;background:var(--amber-soft);color:var(--amber);border-radius:999px;
+  padding:0 7px;font-size:11.5px}
+.sidebar-foot{margin-top:auto;padding:12px 10px 0;border-top:1px solid var(--border);font-size:11.5px;color:var(--soft);line-height:1.5}
+/* 主区 */
+.main{flex:1;min-width:0;padding:22px 28px 48px;max-width:1180px}
+.page{display:none}.page.active{display:block}
+.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+.page-title{font-size:21px;font-weight:600;line-height:1.3;margin:0}
+.page-desc{color:var(--muted);margin:4px 0 0;max-width:660px}
+.page-foot{margin-top:22px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--soft)}
+/* 组件 */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-base);padding:16px;margin-bottom:16px}
+.card-title{font-size:15px;font-weight:600;margin:0 0 10px;display:flex;align-items:center;gap:10px}
+.card-title .mini-btn{margin-left:auto}
+.notice{display:flex;gap:10px;align-items:flex-start;background:var(--primary-soft);border-left:3px solid var(--primary);
+  border-radius:var(--radius-sm);padding:10px 12px;font-size:12.5px;color:var(--primary-ink);margin-bottom:14px}
+.notice.warn{background:var(--amber-soft);border-left-color:var(--amber);color:var(--amber)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-base);padding:12px 14px}
+.metric .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.metric .k{font-size:12.5px;color:var(--muted);margin-top:2px}
+.btn{display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius-sm);padding:8px 14px;font-size:14px;
+  cursor:pointer;border:1px solid transparent;background:transparent}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
+.btn-secondary{background:var(--surface);color:var(--text);border-color:var(--border-strong)}
+.btn-mini{padding:3px 9px;font-size:12.5px}
+.table{width:100%;border-collapse:collapse;font-size:12.5px}
+.table th,.table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;word-break:break-all}
+.table th{color:var(--muted);font-weight:500}
+.table tr:hover td{background:var(--surface-2)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12.5px;white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge-ok{background:var(--green-soft);color:var(--green)}
+.badge-skip{background:var(--surface-3);color:var(--muted)}
+.badge-warn{background:var(--amber-soft);color:var(--amber)}
+.badge-err{background:var(--red-soft);color:var(--red)}
+.badge-teal{background:var(--teal-soft);color:var(--teal)}
+.badge-brand{background:var(--primary-soft);color:var(--primary-ink)}
+.badge-violet{background:var(--violet-soft);color:var(--violet)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12.5px;color:var(--muted)}
+input,select{padding:8px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:14px;
+  background:var(--surface);color:var(--text)}
+.form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+/* 场景卡片 */
+.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+.scenario{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-base);padding:16px;cursor:pointer}
+.scenario:hover{border-color:var(--primary)}
+.scenario .icon{font-size:22px}
+.scenario h3{font-size:15px;margin:8px 0 6px}
+.scenario p{font-size:12.5px;color:var(--muted);margin:0 0 10px;min-height:38px}
+.scenario .stat{font-size:12px;color:var(--soft)}
+.scenario .go{color:var(--primary);font-size:12.5px;margin-top:8px;display:inline-block}
+/* 状态机进度条（品牌隐喻位：唯一允许光谱渐变处） */
+.spectrum{height:4px;border-radius:2px;background:linear-gradient(90deg,#ba3030,#d97706,#156f43,#0f766e,#155e75,#6d4fc2);opacity:.85}
+.node-chain{display:flex;align-items:flex-start;gap:0;margin-top:14px;overflow-x:auto;padding-bottom:4px}
+.node{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:88px;flex:1}
+.node .dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:13px;background:var(--surface-3);color:var(--soft);border:2px solid var(--surface-3)}
+.node.done .dot{background:var(--primary);border-color:var(--primary);color:#fff}
+.node.current .dot{background:var(--surface);border-color:var(--primary);color:var(--primary);
+  animation:pulse 1.6s ease-out infinite}
+.node.fail .dot{background:var(--red);border-color:var(--red);color:#fff}
+.node .label{font-size:12px;color:var(--muted);text-align:center}
+.node.current .label{color:var(--primary-ink);font-weight:500}
+.node-link{flex:0 0 26px;height:2px;background:var(--border);margin-top:13px}
+.node-link.done{background:var(--primary)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(21,94,117,.35)}70%{box-shadow:0 0 0 8px rgba(21,94,117,0)}100%{box-shadow:0 0 0 0 rgba(21,94,117,0)}}
+/* 证据表 */
+.evi td_grade{white-space:nowrap}
+.evi .src{font-size:11.5px;color:var(--soft)}
+/* connector 卡片 */
+.connector{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid var(--border);
+  border-radius:var(--radius-base);padding:12px 14px;margin-bottom:10px;background:var(--surface)}
+.connector .desc{font-size:12.5px;color:var(--muted)}
+.connector .params{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end}
+/* 对话 */
+.chat{max-width:780px}
+.chat-log{display:flex;flex-direction:column;gap:12px;max-height:56vh;overflow-y:auto;padding:2px;margin-bottom:14px}
+.msg{max-width:84%;padding:10px 12px;border-radius:var(--radius-base)}
+.msg.user{align-self:flex-end;background:var(--primary);color:#fff}
+.msg.assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--border)}
+.msg .meta{display:block;font-size:11.5px;margin-top:6px;color:var(--soft)}
+.composer{display:flex;gap:8px}.composer input{flex:1}
+.plan-card{background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius-base);
+  padding:12px;margin-top:10px}
+.plan-card h3{font-size:13px;margin:0 0 8px;color:var(--primary-ink)}
+.plan-card dl{display:grid;grid-template-columns:96px 1fr;gap:4px 10px;margin:0 0 10px;font-size:13px}
+.plan-card dt{color:var(--muted)}.plan-card dd{margin:0;word-break:break-all}
+.plan-actions{display:flex;gap:8px}
+@media(max-width:900px){.shell{flex-direction:column}.sidebar{width:100%;height:auto;position:static}
+  .metrics{grid-template-columns:repeat(2,1fr)}.scenario-grid{grid-template-columns:1fr}}
+.demo-tag{position:fixed;right:14px;bottom:14px;background:var(--violet);color:#fff;font-size:11.5px;
+  padding:4px 10px;border-radius:999px;z-index:9}
+</style>
+</head>
+<body>
+<div class="demo-tag">DEMO · 静态演示稿（mock 数据）</div>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="name">🕸️ 棱镜采集工作台</div>
+      <div class="sub">研究 · 数据源 · 临时采集</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">工作台</div>
+      <button class="nav-item active" data-page="overview">🏠 总览</button>
+      <button class="nav-item" data-page="research">🔬 研究工作台<span class="count">1</span></button>
+      <button class="nav-item" data-page="sources">📡 数据源</button>
+      <button class="nav-item" data-page="chat">💬 对话助手</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">数据与运维</div>
+      <button class="nav-item" data-page="runs">📋 运行记录</button>
+      <button class="nav-item" data-page="export">⬇️ 导出</button>
+    </div>
+    <div class="sidebar-foot">仅采集允许抓取的公开数据；研究执行前需你确认计划；数据仅存本机。</div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ============ 总览 ============ -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">总览</h1>
+          <p class="page-desc">三类采集任务的运行中枢：深度研究、定制数据源与临时采集。下一步：处理 2 个待办。</p>
+        </div>
+      </div>
+      <div class="notice warn">⚠️ 待办：<b>1 份报告待补证</b>（蜜雪冰城品牌研究）· <b>1 个数据源连续 3 次抓取失败</b>（某统计局页面改版）</div>
+      <div class="metrics">
+        <div class="metric"><div class="v">34</div><div class="k">今日任务</div></div>
+        <div class="metric"><div class="v">1</div><div class="k">研究进行中</div></div>
+        <div class="metric"><div class="v">8</div><div class="k">活跃数据源</div></div>
+        <div class="metric"><div class="v">182k</div><div class="k">今日 LLM tokens</div></div>
+      </div>
+      <div class="scenario-grid">
+        <div class="scenario" onclick="go('research')">
+          <div class="icon">🔬</div>
+          <h3>深度研究</h3>
+          <p>多步工作流：联网检索采证 → 数据整合 → 报告写作 → 质量校验，支持失败续跑与补证循环。商圈 / 品牌 / 企业三类模板。</p>
+          <div class="stat">进行中 1 · 本周完成 3</div><span class="go">进入工作台 →</span>
+        </div>
+        <div class="scenario" onclick="go('sources')">
+          <div class="icon">📡</div>
+          <h3>定制数据源</h3>
+          <p>天气、统计局等结构化数据的定时采集：选连接器、填参数、定频率，数值型数据直接入库可导出。</p>
+          <div class="stat">8 个数据源 · 7 正常 / 1 异常</div><span class="go">管理数据源 →</span>
+        </div>
+        <div class="scenario" onclick="go('chat')">
+          <div class="icon">💬</div>
+          <h3>临时采集</h3>
+          <p>对话式描述需求，助手整理成采集计划，经你确认后执行；单页结构化提取，即采即得。</p>
+          <div class="stat">今日 12 次 · 成功率 100%</div><span class="go">去对话 →</span>
+        </div>
+      </div>
+      <p class="page-foot">三类任务共享同一套预算熔断、供应商降级与运行台账；研究类任务执行前需确认计划。</p>
+    </section>
+
+    <!-- ============ 研究工作台 ============ -->
+    <section class="page" id="page-research">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">研究工作台</h1>
+          <p class="page-desc">发起与管理多步研究：检索采证 → 综合写作 → 质量校验 → 补证。每个节点可追溯来源，失败可从断点续跑。</p>
+        </div>
+        <button class="btn btn-primary" onclick="toggleCard('new-research')">＋ 新建研究</button>
+      </div>
+
+      <div class="card" id="new-research" style="display:none">
+        <h2 class="card-title">新建研究</h2>
+        <div class="form-row">
+          <div class="field">
+            <label>研究类型</label>
+            <select><option>商圈研究</option><option>品牌研究</option><option>企业研究</option></select>
+          </div>
+          <div class="field" style="flex:1 1 280px">
+            <label>研究对象</label>
+            <input type="text" placeholder="如：深圳 · 前海商圈 / 蜜雪冰城 / 瑞幸咖啡">
+          </div>
+          <div class="field">
+            <label>研究深度</label>
+            <select><option>标准（约 20 分钟 / 15 万 tokens）</option><option>快速（约 8 分钟）</option><option>深度（约 45 分钟）</option></select>
+          </div>
+          <button class="btn btn-primary">开始研究</button>
+        </div>
+        <p class="page-desc" style="margin-top:10px">发起后先出<b>研究计划</b>（检索策略与节点安排）供你确认，确认后才开始消耗 tokens。</p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">研究任务</h2>
+        <table class="table">
+          <thead><tr><th>研究对象</th><th>类型</th><th>状态</th><th>进度</th><th>证据</th><th>开始时间</th><th></th></tr></thead>
+          <tbody>
+            <tr style="cursor:pointer" onclick="toggleCard('rd-1')">
+              <td><b>深圳 · 前海商圈</b></td><td>商圈研究</td>
+              <td><span class="badge badge-warn">进行中</span></td>
+              <td>4 / 6 节点</td><td>20 条</td><td>今天 14:02</td><td class="go">展开 ▾</td>
+            </tr>
+            <tr style="cursor:pointer" onclick="toggleCard('rd-2')">
+              <td><b>蜜雪冰城</b></td><td>品牌研究</td>
+              <td><span class="badge badge-warn">待补证</span></td>
+              <td>5 / 6 节点</td><td>34 条</td><td>昨天 09:31</td><td class="go">展开 ▾</td>
+            </tr>
+            <tr style="cursor:pointer">
+              <td><b>瑞幸咖啡（近 6 个月扩张）</b></td><td>企业研究</td>
+              <td><span class="badge badge-ok">已完成</span></td>
+              <td>6 / 6 节点</td><td>41 条</td><td>09-14 16:40</td><td class="go">查看 →</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 进行中研究的节点视图 -->
+      <div class="card" id="rd-1" style="display:none">
+        <h2 class="card-title">深圳 · 前海商圈 — 执行视图</h2>
+        <div class="spectrum"></div>
+        <div class="node-chain">
+          <div class="node done"><div class="dot">✓</div><div class="label">选题初始化</div></div>
+          <div class="node-link done"></div>
+          <div class="node current"><div class="dot">●</div><div class="label">网络采证</div></div>
+          <div class="node-link"></div>
+          <div class="node"><div class="dot">3</div><div class="label">数据整合</div></div>
+          <div class="node-link"></div>
+          <div class="node"><div class="dot">4</div><div class="label">报告写作</div></div>
+          <div class="node-link"></div>
+          <div class="node"><div class="dot">5</div><div class="label">质量校验</div></div>
+          <div class="node-link"></div>
+          <div class="node"><div class="dot">6</div><div class="label">补证循环</div></div>
+        </div>
+        <div class="notice" style="margin-top:14px">
+          🔎 当前节点「网络采证」并行两分支：<b>分支 A · 区位与客群</b>（已获 12 条证据）与
+          <b>分支 B · 商业生态与竞品</b>（已获 8 条证据）；检索走 MiniMax web_search，每条证据强制携带来源链接。
+        </div>
+        <p class="page-desc" style="margin:0">已运行 18 分钟 · 累计 96k tokens · 断点续跑已开启（节点失败自动暂停，可从当前节点恢复）</p>
+      </div>
+
+      <!-- 待补证研究的报告视图 -->
+      <div class="card" id="rd-2" style="display:none">
+        <h2 class="card-title">蜜雪冰城 — 报告预览（待补证）</h2>
+        <div class="notice warn">⚠️ 数据缺口 2 项：①竞品门店坪效无公开来源 ②东南亚加盟政策变动缺权威报道——补证节点已生成 3 条检索建议，可一键续跑补证。</div>
+        <table class="table evi">
+          <thead><tr><th style="width:72px">等级</th><th>证据内容</th><th>来源</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge badge-teal">A级 事实</span></td>
+                <td>2026Q2 全国门店数 42,150 家，净增 1,820 家；出海门店 4,800 家</td>
+                <td class="src">蜜雪冰城招股书 · 2026-08</td></tr>
+            <tr><td><span class="badge badge-brand">B级 行业</span></td>
+                <td>现制茶饮行业单店日均销 3,200 元，蜜雪以 2,100 元走量模型差异化</td>
+                <td class="src">艾媒咨询行业报告 · 2026-06</td></tr>
+            <tr><td><span class="badge badge-warn">C级 待复核</span></td>
+                <td>传东南亚单店回本周期缩短至 10 个月（论坛多处流传，需交叉验证）</td>
+                <td class="src">餐饮老板内参评论区</td></tr>
+            <tr><td><span class="badge badge-violet">推断</span></td>
+                <td>推断：以量取胜模型对供应链成本敏感，糖价波动为主要风险（置信度：中）</td>
+                <td class="src">—</td></tr>
+          </tbody>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-mini">▶ 续跑补证（3 条检索建议）</button>
+          <button class="btn btn-secondary btn-mini">导出 Markdown</button>
+          <button class="btn btn-secondary btn-mini">查看全文</button>
+        </div>
+      </div>
+      <p class="page-foot">研究执行器基于 pi SDK 嵌入；所有外部数据必须来自实际检索并携带来源，禁止以模型记忆伪装证据。</p>
+    </section>
+
+    <!-- ============ 数据源 ============ -->
+    <section class="page" id="page-sources">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">数据源</h1>
+          <p class="page-desc">结构化数据的定时采集：从连接器市场添加，或像以前一样添加任意网页来源；全部走统一的合规抓取与限速。</p>
+        </div>
+      </div>
+      <div class="notice">💡 连接器是确定性的定时采集（不走 LLM，零 token 成本）；「LLM 提取」类来源才会消耗预算。</div>
+
+      <div class="card">
+        <h2 class="card-title">添加数据源</h2>
+        <div class="connector">
+          <div>
+            <b>🌤 天气数据</b> <span class="desc">· open-meteo 免费接口，无需 Key；温度 / 降水 / 风速时序</span>
+            <div class="params">
+              <div class="field"><label>城市</label><select><option>深圳</option><option>上海</option><option>北京</option></select></div>
+              <div class="field"><label>频率</label><select><option>每小时</option><option>每天</option></select></div>
+              <button class="btn btn-primary btn-mini">添加</button>
+            </div>
+          </div>
+          <span class="badge badge-skip">连接器 · 零成本</span>
+        </div>
+        <div class="connector">
+          <div>
+            <b>📊 国家统计局</b> <span class="desc">· 宏观数据集：CPI / PPI / 社零总额等月度序列</span>
+            <div class="params">
+              <div class="field"><label>数据集</label><select><option>CPI 月度同比</option><option>社会消费品零售总额</option><option>70 城房价指数</option></select></div>
+              <div class="field"><label>频率</label><select><option>每月</option><option>每天检查</option></select></div>
+              <button class="btn btn-primary btn-mini">添加</button>
+            </div>
+          </div>
+          <span class="badge badge-skip">连接器 · 零成本</span>
+        </div>
+        <div class="connector">
+          <div>
+            <b>🌐 任意网页来源</b> <span class="desc">· 页面正文 → LLM 结构化提取（沿用现有能力，也可在对话助手里用一句话创建）</span>
+            <div class="params">
+              <div class="field" style="flex:1 1 260px"><label>页面网址</label><input type="text" placeholder="https://…"></div>
+              <button class="btn btn-secondary btn-mini">添加来源</button>
+            </div>
+          </div>
+          <span class="badge badge-brand">LLM 提取</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">已配置数据源</h2>
+        <table class="table">
+          <thead><tr><th>名称</th><th>类型</th><th>频率</th><th>最近结果</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr><td><b>深圳天气</b></td><td><span class="badge badge-skip">连接器</span></td><td>每小时</td>
+                <td><span class="badge badge-ok">成功</span> 10:00 · 28.4℃</td><td>启用</td>
+                <td><button class="btn btn-secondary btn-mini">暂停</button></td></tr>
+            <tr><td><b>CPI 月度同比</b></td><td><span class="badge badge-skip">连接器</span></td><td>每月</td>
+                <td><span class="badge badge-ok">成功</span> 09-15 · 0.6%</td><td>启用</td>
+                <td><button class="btn btn-secondary btn-mini">暂停</button></td></tr>
+            <tr><td><b>HackerNews</b></td><td><span class="badge badge-brand">LLM 提取</span></td><td>每小时</td>
+                <td><span class="badge badge-skip">无正文内容</span> 10:00</td><td>启用</td>
+                <td><button class="btn btn-secondary btn-mini">暂停</button></td></tr>
+            <tr><td><b>某统计局数据页</b></td><td><span class="badge badge-skip">连接器</span></td><td>每天</td>
+                <td><span class="badge badge-err">抓取失败 ×3</span> 页面改版？</td><td>启用</td>
+                <td><button class="btn btn-secondary btn-mini">去修复</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">数据预览 — 深圳天气（最近 5 条）
+          <button class="btn btn-secondary btn-mini" style="margin-left:auto">导出 CSV</button></h2>
+        <table class="table">
+          <thead><tr><th>时间</th><th>温度（℃）</th><th>降水（mm）</th><th>风速（km/h）</th><th>天气</th></tr></thead>
+          <tbody>
+            <tr><td>09-18 10:00</td><td>28.4</td><td>0.0</td><td>12</td><td>多云</td></tr>
+            <tr><td>09-18 09:00</td><td>27.9</td><td>0.0</td><td>10</td><td>多云</td></tr>
+            <tr><td>09-18 08:00</td><td>27.1</td><td>0.2</td><td>9</td><td>小雨</td></tr>
+            <tr><td>09-18 07:00</td><td>26.5</td><td>0.6</td><td>8</td><td>小雨</td></tr>
+            <tr><td>09-18 06:00</td><td>26.0</td><td>0.0</td><td>7</td><td>阴</td></tr>
+          </tbody>
+        </table>
+        <p class="page-desc" style="margin:10px 0 0">共 4,380 条 · 时序数据按行入库，支持按日期区间导出。</p>
+      </div>
+      <p class="page-foot">连接器采集为确定性抓取（不消耗 LLM 预算）；失败源连续 3 次异常自动标记待修复并通知。</p>
+    </section>
+
+    <!-- ============ 对话助手 ============ -->
+    <section class="page" id="page-chat">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">对话助手</h1>
+          <p class="page-desc">用自然语言描述采集需求——小任务直接整理成计划执行；研究类需求会引导你去研究工作台。</p>
+        </div>
+      </div>
+      <div class="card chat">
+        <div class="chat-log">
+          <div class="msg assistant">你好，我是采集助手。想<b>采集什么内容、从哪采、多久一次</b>？小任务我直接办；需要多步研究的我会帮你建研究任务。</div>
+
+          <div class="msg user">帮我每小时盯一下 HackerNews 首页的技术热点</div>
+          <div class="msg assistant">
+            好的，已整理为采集计划，请确认：
+            <div class="plan-card">
+              <h3>采集计划（待确认）</h3>
+              <dl>
+                <dt>来源名称</dt><dd>HackerNews 技术热点</dd>
+                <dt>采集网址</dt><dd>https://news.ycombinator.com</dd>
+                <dt>数据类型</dt><dd>NewsItem</dd>
+                <dt>采集频率</dt><dd>每 1 小时</dd>
+                <dt>渲染方式</dt><dd>浏览器渲染（JS 列表页）</dd>
+              </dl>
+              <div class="plan-actions">
+                <button class="btn btn-primary btn-mini">✅ 确认创建并立即执行</button>
+                <button class="btn btn-mini" style="border:1px solid var(--border-strong)">仅创建来源</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg user">帮我深入研究一下瑞幸咖啡最近半年的扩张策略</div>
+          <div class="msg assistant">
+            这个需求超出了单页采集——它需要<b>多轮联网检索、证据整合和报告写作</b>。我可以在「研究工作台」为你创建一份研究任务草稿：
+            <div class="plan-card">
+              <h3>研究任务草稿（企业研究）</h3>
+              <dl>
+                <dt>研究对象</dt><dd>瑞幸咖啡</dd>
+                <dt>研究范围</dt><dd>近 6 个月扩张策略（门店 / 联名 / 出海 / 供应链）</dd>
+                <dt>预计成本</dt><dd>约 15 万 tokens · 20 分钟</dd>
+              </dl>
+              <div class="plan-actions">
+                <button class="btn btn-primary btn-mini" onclick="go('research')">去研究工作台确认 →</button>
+              </div>
+            </div>
+            <span class="meta">研究任务会先出检索计划供你确认，确认后才消耗 tokens。</span>
+          </div>
+        </div>
+        <div class="composer">
+          <input type="text" placeholder="描述你的采集或研究需求…" disabled>
+          <button class="btn btn-primary" disabled>发送</button>
+        </div>
+      </div>
+      <p class="page-foot">助手只负责整理计划，不会自动执行；研究与采集的一切执行都需你点击确认。</p>
+    </section>
+
+    <!-- ============ 运行记录 / 导出（沿用现有设计，占位） ============ -->
+    <section class="page" id="page-runs">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">运行记录</h1>
+          <p class="page-desc">沿用现有设计：全部任务（研究节点 / 连接器 / 临时采集）的统一台账，终态六分类 + 按类型过滤。</p>
+        </div>
+        <button class="btn btn-secondary">刷新</button>
+      </div>
+      <div class="card">
+        <table class="table">
+          <thead><tr><th>#</th><th>时间</th><th>任务类型</th><th>状态</th><th>对象</th><th>Token(in/out)</th><th>耗时</th></tr></thead>
+          <tbody>
+            <tr><td>128</td><td>10:00</td><td><span class="badge brand badge-brand">研究节点</span></td><td><span class="badge badge-ok">成功</span></td><td>前海商圈 · 网络采证 A</td><td>8.2k / 1.1k</td><td>6 分 12 秒</td></tr>
+            <tr><td>127</td><td>10:00</td><td><span class="badge badge-skip">连接器</span></td><td><span class="badge badge-ok">成功</span></td><td>深圳天气</td><td>0 / 0</td><td>0.8 秒</td></tr>
+            <tr><td>126</td><td>09:41</td><td><span class="badge badge-teal">临时采集</span></td><td><span class="badge badge-skip">内容未变</span></td><td>wikipedia.org/wiki/Web_scraping</td><td>0 / 0</td><td>1.1 秒</td></tr>
+            <tr><td>125</td><td>09:15</td><td><span class="badge badge-skip">连接器</span></td><td><span class="badge badge-err">抓取失败</span></td><td>某统计局数据页</td><td>0 / 0</td><td>30 秒</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="page-foot">台账分两级：任务级（job_runs，含研究节点状态）与采集动作级（crawl_runs，保留现有口径）。</p>
+    </section>
+
+    <section class="page" id="page-export">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">导出</h1>
+          <p class="page-desc">沿用现有设计，扩展两类产出：研究报告（Markdown/PDF）与时序数据集（CSV/JSON）。</p>
+        </div>
+      </div>
+      <div class="card"><h2 class="card-title">（此页在重构中沿用现有布局，新增报告与数据集两种导出类型）</h2></div>
+    </section>
+
+  </main>
+</div>
+<script>
+function go(name) {
+  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === name));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === "page-" + name));
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll(".nav-item").forEach(b => b.addEventListener("click", () => go(b.dataset.page)));
+function toggleCard(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === "none" ? "block" : "none";
+}
+</script>
+</body>
+</html>

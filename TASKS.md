@@ -293,17 +293,17 @@
 
 ### T7.1 schema v3：jobs / job_runs / artifacts
 - **内容**：`src/storage/db.ts` 升 SCHEMA_VERSION=3——新增 `jobs`（type/name/ref_id/payload/schedule/enabled + type×ref_id 唯一索引）、`job_runs`（job_id/status/node_state/tokens/started_at/finished_at）、`artifacts`（job_run_id/kind/title/content/meta）；迁移 v2→v3 含 **sources→jobs 1:1 回填**（INSERT OR IGNORE，幂等重跑安全）；配套写入接口。
-- **验收**：[ ] v2 库打开自动迁移且回填正确（重复打开幂等）；[ ] 全新库直建 v3；[ ] 迁移/接口单测。
+- **验收**：[x] v2 库打开自动迁移且回填正确（重复打开幂等）；[x] 全新库直建 v3；[x] 迁移/接口单测（真实库 20:2x 已迁 v3，jobs 1:1 回填 2 条）。
 ### T7.2 Job 内核与 Executor 接口
 - **内容**：`src/status.ts` 增 `JobStatus`（running/success/failed/paused/skipped，独立于 RunStatus 不混用）；`src/jobs/`：Job/JobResult 契约、`JobExecutor` 接口、`runJob`（生命周期包裹：job_runs running→终态回写）、`tickJobs`（扫 enabled jobs 按调度到期执行，lastRun 语义与现 tick 一致：派发时刻记账、改间隔下个 tick 生效）。
-- **验收**：[ ] 生命周期单测（成功/异常→failed/预算跳过→skipped 不派发）；[ ] tick 调度语义单测（启用过滤/间隔/改间隔生效）。
+- **验收**：[x] 生命周期单测（成功/异常→failed/无执行器/预算跳过→skipped 不派发）；[x] tick 调度语义单测（启用过滤/间隔内不重复/改间隔下个 tick 生效/串行）。
 ### T7.3 SourceExecutor 挂载（行为不变迁移）
 - **内容**：`src/jobs/sourceExecutor.ts` 包装现有 pipeline（ref_id→sources 行→TaskSpec→run）；RunStatus→JobStatus 映射（SUCCESS/SKIPPED_*→success，其余→failed）；crawl_runs 动作级台账照旧。daemon `runTick` 改扫 jobs；webapp `/api/run` source 路径走内核；来源管理/发现写 sources 时同步 upsert 对应 job。
-- **验收**：[ ] 现有 daemon/webapp 全部测试语义不变通过；[ ] 真实 daemon 切换后台账连续（job_runs 与 crawl_runs 双写对齐）。
+- **验收**：[x] 现有测试语义迁移完成（82 项全绿，含新增 kernel/sourceExecutor/v3 迁移测试）；[x] 真实 daemon 双写对齐实证——首 tick job_runs(success, 0 tokens) 与 crawl_runs(SKIPPED_*) 对应，**并抓到 Phase 6 回归**：/api/run 响应 camelCase 与前端 snake_case 契约错位（补 outcomeToApi）、TS parser 链接密度防线对齐 trafilatura（真实 HN 页面固化为夹具回归）。
 ### T7.4 Phase 7 收尾
-- **验收**：[ ] 全量测试绿 + tsc 零错误；[ ] 真实 daemon 运行观察一轮 tick；[ ] 双端同步。
+- **验收**：[x] 全量 82 绿 + tsc 零错误；[x] 真实 daemon（内核版）tick 观察通过；[x] 双端同步。
 
-**阶段闸门 7**：现有两场景在新内核下行为与迁移前一致（六终态口径/去重/预算/降级全部回归），sources 历史与台账无丢失。
+**阶段闸门 7**：✅ 通过（2026-09-18）——两场景在新内核下行为一致：HN 恢复 SKIPPED_NO_CONTENT（0 tokens）、Wikipedia 去重命中（0 tokens）、MiniMax 配额窗口内真实 SUCCESS 实证（tokens 5434/225、12765/256）；sources/台账历史无丢失，job_runs 与 crawl_runs 两级对齐。
 
 ## Phase 8：定制数据采集（connector 框架）
 

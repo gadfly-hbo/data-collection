@@ -8,9 +8,10 @@ import express, { type Express } from "express";
 import { loadDotenv } from "../src/dotenv.ts";
 loadDotenv();
 
-import { BudgetExhausted } from "../src/budget.ts";
 import { loadSettings, type Settings } from "../src/config.ts";
-import { isOkOutcome } from "../src/pipeline.ts";
+import { getSchema } from "../src/models/schemas.ts";
+import { isOkOutcome, type RunOutcome } from "../src/pipeline.ts";
+import { JobStatus } from "../src/status.ts";
 import { SCHEMA_REGISTRY } from "../src/models/schemas.ts";
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
@@ -19,8 +20,7 @@ import * as queries from "../src/storage/queries.ts";
 import { fetchRows, toCsv, toJson, toMarkdown } from "./export-data.ts";
 import {
   buildContext,
-  enabledSources,
-  runSource,
+  makeJobContext,
   runTick,
   type DaemonContext,
 } from "./run-daemon.ts";
@@ -31,6 +31,22 @@ const DB_PATH = resolve(REPO_ROOT, "data/collector.db");
 
 function zodDescription(schema: unknown): string {
   return ((schema as { description?: string }).description ?? "").trim();
+}
+
+export /** RunOutcome → 前端 API 契约（snake_case；Phase 6 TS 移植时曾丢失此映射） */
+function outcomeToApi(outcome: RunOutcome): Record<string, unknown> {
+  return {
+    status: outcome.status,
+    url: outcome.url,
+    provider: outcome.provider,
+    model: outcome.model,
+    input_tokens: outcome.inputTokens,
+    output_tokens: outcome.outputTokens,
+    duration_ms: outcome.durationMs,
+    error: outcome.error ?? null,
+    run_id: outcome.runId ?? null,
+    item: outcome.item ?? null,
+  };
 }
 
 export function createApp(
@@ -106,35 +122,30 @@ export function createApp(
 
   app.post("/api/run", async (req, res) => {
     const body = req.body ?? {};
-    let source: Record<string, unknown>;
     if (body.source_id != null) {
-      const row = db.conn.prepare("SELECT * FROM sources WHERE id = ?").get(body.source_id);
-      if (!row) return res.status(404).json({ detail: "来源不存在" });
-      source = row as Record<string, unknown>;
-    } else {
-      if (!body.url) return res.status(422).json({ detail: "需要 source_id 或 url" });
-      if (!SCHEMA_REGISTRY[body.schema_type ?? "NewsItem"]) {
-        return res.status(400).json({ detail: `未知 schema_type: ${body.schema_type}` });
+      // 来源任务：走 Job 内核（job_runs 任务级台账 + crawl_runs 动作级台账）
+      const job = db.getSourceJob(Number(body.source_id));
+      if (!job) return res.status(404).json({ detail: "来源不存在" });
+      const result = await ctx.kernel.runJob(job as never, makeJobContext(ctx));
+      if (result.status === JobStatus.SKIPPED) {
+        return res.json({ ok: false, error: `任务被预算熔断跳过：${result.error ?? ""}` });
       }
-      source = {
-        id: null,
-        url: body.url,
-        schema_type: body.schema_type ?? "NewsItem",
-        use_browser: body.use_browser ? 1 : 0,
-        instruction: body.instruction ?? "",
-      };
+      const outcome = result.detail as RunOutcome | undefined;
+      if (outcome) return res.json({ ok: isOkOutcome(outcome.status), ...outcomeToApi(outcome) });
+      return res.json({ ok: false, status: "FETCH_ERROR", error: result.error });
     }
-    try {
-      const outcome = await runSource(source as never, ctx);
-      if (!outcome) {
-        return res.json({ ok: false,
-          error: "任务被预算熔断跳过（未消耗 LLM 调用，详见日志；台账不记跳过属设计口径）" });
-      }
-      res.json({ ok: isOkOutcome(outcome.status), ...outcome });
-    } catch (e) {
-      if (e instanceof BudgetExhausted) return res.status(409).json({ detail: e.message });
-      throw e;
+    // ad-hoc 单页采集：非任务实体，直接走 pipeline（仅 crawl_runs 动作级台账）
+    if (!body.url) return res.status(422).json({ detail: "需要 source_id 或 url" });
+    if (!SCHEMA_REGISTRY[body.schema_type ?? "NewsItem"]) {
+      return res.status(400).json({ detail: `未知 schema_type: ${body.schema_type}` });
     }
+    const outcome = await ctx.pipeline.run({
+      url: String(body.url),
+      schema: getSchema(body.schema_type ?? "NewsItem"),
+      instruction: body.instruction ?? "",
+      useBrowser: Boolean(body.use_browser),
+    });
+    res.json({ ok: isOkOutcome(outcome.status), ...outcomeToApi(outcome) });
   });
 
   app.get("/api/items", (req, res) => {
@@ -212,10 +223,10 @@ export function createApp(
 
   if (opts.withScheduler) {
     const timer = setInterval(() => {
-      runTick(ctx, db).catch((e) => console.error("tick 执行异常：", e));
+      runTick(ctx).catch((e) => console.error("tick 执行异常：", e));
     }, ctx.tickS * 1000);
     timer.unref();
-    void runTick(ctx, db); // 首 tick 立即执行
+    void runTick(ctx); // 首 tick 立即执行
     app.locals.tickTimer = timer;
   }
   return app;

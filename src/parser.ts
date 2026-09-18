@@ -20,5 +20,14 @@ export function extractMarkdown(html: string, url?: string): string | null {
     return null; // 正文过短视为无正文（列表页/骨架页），省下 LLM 调用
   }
   const markdown = turndown.turndown(article.content).trim();
-  return markdown.length >= 80 ? markdown : null;
+  if (markdown.length < 80) return null;
+  // 链接密度判定（对齐 Python trafilatura favor_precision 的语义）：
+  // 非空行中链接行占比过高且行偏短 → 列表页/导航骨架，判无正文省下 LLM 调用
+  const lines = markdown.split(/\n+/).filter((l) => l.trim());
+  const linkLines = lines.filter((l) => /\]\(http/.test(l));
+  const avgLen = markdown.length / Math.max(lines.length, 1);
+  if (lines.length >= 5 && linkLines.length / lines.length >= 0.6 && avgLen < 150) {
+    return null;
+  }
+  return markdown;
 }

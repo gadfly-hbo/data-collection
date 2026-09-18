@@ -1,11 +1,12 @@
-/** SQLite 初始化与写入接口：三张核心表 + schema_version（node:sqlite）。
+/** SQLite 初始化与写入接口：核心表 + schema_version（node:sqlite）。
+ *  v3 起：jobs / job_runs / artifacts（统一 Job 内核，见 PLAN §11）。
  *  单 Worker 串行写入（AGENTS.md 硬性规则）：一个 Database 实例一个连接全进程复用。 */
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { SCHEMA_REGISTRY } from "../models/schemas.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const MIN_INTERVAL_S = 60; // 来源调度间隔下限（秒）
 
 const DDL = `
@@ -52,10 +53,48 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ── v3：统一 Job 内核（PLAN §11）──
+CREATE TABLE IF NOT EXISTS jobs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL,               -- 'source' | 'custom' | 'research'
+    name       TEXT,
+    ref_id     INTEGER,                     -- type=source → sources.id（payload 子表）
+    payload    TEXT NOT NULL DEFAULT '{}',  -- type!=source 的配置（per-type 校验）
+    schedule   TEXT NOT NULL DEFAULT '{"kind":"interval","interval_s":3600}',
+    enabled    INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_source_ref ON jobs (type, ref_id)
+    WHERE ref_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        INTEGER REFERENCES jobs(id),
+    status        TEXT NOT NULL,            -- JobStatus: running/success/failed/paused/skipped
+    node_state    TEXT,                     -- research：节点状态快照（断点续跑）
+    input_tokens  INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    error         TEXT,
+    started_at    TEXT DEFAULT (datetime('now')),
+    finished_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_run_id  INTEGER REFERENCES job_runs(id),
+    kind        TEXT NOT NULL,              -- 'report' | 'dataset'（item 由 extracted_items 承担）
+    title       TEXT,
+    content     TEXT NOT NULL,
+    meta        TEXT,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_dedup ON crawl_runs (url, raw_hash, status);
 CREATE INDEX IF NOT EXISTS idx_runs_created ON crawl_runs (created_at);
 CREATE INDEX IF NOT EXISTS idx_items_run ON extracted_items (run_id);
 CREATE INDEX IF NOT EXISTS idx_items_schema ON extracted_items (schema_type);
+CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs (job_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts (job_run_id);
 `;
 
 /** 已发布版本的增量迁移：key = 迁移到的版本号 */
@@ -63,6 +102,14 @@ const MIGRATIONS: Record<number, string[]> = {
   2: [
     "ALTER TABLE sources ADD COLUMN use_browser INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE sources ADD COLUMN instruction TEXT NOT NULL DEFAULT ''",
+  ],
+  3: [
+    // sources → jobs 1:1 回填（幂等：type×ref_id 唯一索引 + OR IGNORE）
+    `INSERT OR IGNORE INTO jobs (type, name, ref_id, payload, schedule, enabled, created_at)
+     SELECT 'source', COALESCE(name, url), id, '{}',
+            json_object('kind', 'interval', 'interval_s', interval_s),
+            enabled, created_at
+     FROM sources`,
   ],
 };
 
@@ -123,6 +170,7 @@ export class Database {
     if (row.v === null) {
       // 无版本行：全新库直接登记当前版本；遗留库（缺新列）先补齐迁移
       if (!this.columns("sources").has("use_browser")) this.applyMigration(2);
+      this.applyMigration(3); // 全新库同样执行 sources 回填（幂等，空表无害）
       this.conn
         .prepare("INSERT INTO schema_version (version) VALUES (?)")
         .run(SCHEMA_VERSION);
@@ -138,7 +186,7 @@ export class Database {
     this.conn.close();
   }
 
-  // ---------- sources ----------
+  // ---------- sources（type=source 任务的 payload 子表） ----------
 
   upsertSource(input: SourceInput): number {
     const intervalS = input.intervalS ?? 3600;
@@ -161,7 +209,9 @@ export class Database {
         input.useBrowser ? 1 : 0,
         input.instruction ?? "",
       );
-    return (this.getSource(input.url) as { id: number }).id;
+    const id = (this.getSource(input.url) as { id: number }).id;
+    this.upsertSourceJob(id); // 来源与调度 job 保持 1:1（所有写路径统一）
+    return id;
   }
 
   getSource(url: string): Record<string, unknown> | undefined {
@@ -172,10 +222,138 @@ export class Database {
 
   deleteSource(id: number): boolean {
     // 存在关联台账时抛 IntegrityError（node:sqlite 报 constraint），调用方应改为停用
-    return this.conn.prepare("DELETE FROM sources WHERE id = ?").run(id).changes > 0;
+    const deleted = this.conn.prepare("DELETE FROM sources WHERE id = ?").run(id).changes > 0;
+    if (deleted) {
+      // job 不删（保留历史 job_runs 关联），只停用调度
+      this.conn
+        .prepare("UPDATE jobs SET enabled = 0 WHERE type = 'source' AND ref_id = ?")
+        .run(id);
+    }
+    return deleted;
   }
 
-  // ---------- crawl_runs ----------
+  // ---------- jobs（统一调度实体） ----------
+
+  /** sources → jobs 1:1 同步（幂等；新建/更新来源后调用） */
+  upsertSourceJob(sourceId: number): number {
+    this.conn
+      .prepare(
+        `INSERT INTO jobs (type, name, ref_id, payload, schedule, enabled, created_at)
+         SELECT 'source', COALESCE(name, url), id, '{}',
+                json_object('kind', 'interval', 'interval_s', interval_s),
+                enabled, created_at
+         FROM sources WHERE id = ?
+         ON CONFLICT(type, ref_id) WHERE ref_id IS NOT NULL DO UPDATE SET
+           name = excluded.name, schedule = excluded.schedule,
+           enabled = excluded.enabled`,
+      )
+      .run(sourceId)
+      .toString();
+    const row = this.conn
+      .prepare("SELECT id FROM jobs WHERE type = 'source' AND ref_id = ?")
+      .get(sourceId) as { id: number };
+    return row.id;
+  }
+
+  insertJob(r: {
+    type: string;
+    name?: string | null;
+    refId?: number | null;
+    payload?: string;
+    schedule?: string;
+    enabled?: boolean;
+  }): number {
+    const res = this.conn
+      .prepare(
+        `INSERT INTO jobs (type, name, ref_id, payload, schedule, enabled)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        r.type, r.name ?? null, r.refId ?? null, r.payload ?? "{}",
+        r.schedule ?? '{"kind":"interval","interval_s":3600}',
+        r.enabled === false ? 0 : 1,
+      );
+    return Number(res.lastInsertRowid);
+  }
+
+  getJob(id: number): Record<string, unknown> | undefined {
+    return this.conn.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+  }
+
+  /** type=source 任务按 sources.id 反查（webapp 立即执行路径） */
+  getSourceJob(sourceId: number): Record<string, unknown> | undefined {
+    return this.conn
+      .prepare("SELECT * FROM jobs WHERE type = 'source' AND ref_id = ?")
+      .get(sourceId) as Record<string, unknown> | undefined;
+  }
+
+  listJobs(opts: { enabled?: boolean; type?: string } = {}): Record<string, unknown>[] {
+    let sql = "SELECT * FROM jobs WHERE 1 = 1";
+    const params: (string | number)[] = [];
+    if (opts.enabled !== undefined) {
+      sql += " AND enabled = ?";
+      params.push(opts.enabled ? 1 : 0);
+    }
+    if (opts.type) {
+      sql += " AND type = ?";
+      params.push(opts.type);
+    }
+    return this.conn.prepare(`${sql} ORDER BY id`).all(...params) as Record<string, unknown>[];
+  }
+
+  setJobEnabled(id: number, enabled: boolean): void {
+    this.conn.prepare("UPDATE jobs SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+  }
+
+  // ---------- job_runs（任务级台账） ----------
+
+  insertJobRun(r: { jobId: number; status: string; nodeState?: string | null }): number {
+    const res = this.conn
+      .prepare("INSERT INTO job_runs (job_id, status, node_state) VALUES (?, ?, ?)")
+      .run(r.jobId, r.status, r.nodeState ?? null);
+    return Number(res.lastInsertRowid);
+  }
+
+  updateJobRun(
+    id: number,
+    r: {
+      status: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      error?: string | null;
+      nodeState?: string | null;
+    },
+  ): void {
+    this.conn
+      .prepare(
+        `UPDATE job_runs SET status = ?, input_tokens = ?, output_tokens = ?,
+           error = ?, node_state = COALESCE(?, node_state),
+           finished_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(r.status, r.inputTokens ?? 0, r.outputTokens ?? 0, r.error ?? null, r.nodeState ?? null, id);
+  }
+
+  // ---------- artifacts（report / dataset） ----------
+
+  insertArtifact(r: {
+    jobRunId: number;
+    kind: string;
+    title?: string | null;
+    content: string;
+    meta?: string | null;
+  }): number {
+    const res = this.conn
+      .prepare(
+        `INSERT INTO artifacts (job_run_id, kind, title, content, meta) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(r.jobRunId, r.kind, r.title ?? null, r.content, r.meta ?? null);
+    return Number(res.lastInsertRowid);
+  }
+
+  // ---------- crawl_runs（采集动作级台账，口径不变） ----------
 
   insertRun(r: {
     url: string;

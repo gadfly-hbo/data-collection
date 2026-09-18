@@ -107,3 +107,52 @@ describe("storage/db", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("storage/db v3：jobs 统一调度", () => {
+  it("upsertSource 同步创建 1:1 job；改间隔同步 schedule；幂等不重复", () => {
+    const db = mem();
+    const sid = db.upsertSource({ url: "https://a.example/1", schemaType: "NewsItem", name: "A", intervalS: 120 });
+    let jobs = db.listJobs({ type: "source" });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].ref_id).toBe(sid);
+    expect(JSON.parse(String(jobs[0].schedule))).toEqual({ kind: "interval", interval_s: 120 });
+
+    db.upsertSource({ url: "https://a.example/1", schemaType: "NewsItem", name: "A", intervalS: 3600 });
+    jobs = db.listJobs({ type: "source" });
+    expect(jobs).toHaveLength(1); // 同一来源不产生第二个 job
+    expect(JSON.parse(String(jobs[0].schedule)).interval_s).toBe(3600); // 间隔已同步
+    expect(jobs[0].name).toBe("A");
+  });
+
+  it("deleteSource 停用对应 job（保留行供历史 job_runs 关联）", () => {
+    const db = mem();
+    const sid = db.upsertSource({ url: "https://a.example/1", schemaType: "NewsItem" });
+    db.insertRun({ url: "https://a.example/1", status: "SUCCESS", sourceId: sid }); // 有关联台账
+    expect(() => db.deleteSource(sid)).toThrow(); // 不可删
+    // 无台账来源可删 → job 停用
+    const sid2 = db.upsertSource({ url: "https://b.example/2", schemaType: "NewsItem" });
+    expect(db.deleteSource(sid2)).toBe(true);
+    const job = db.getSourceJob(sid2) as { enabled: number };
+    expect(job.enabled).toBe(0);
+  });
+
+  it("job_runs / artifacts 写入接口", () => {
+    const db = mem();
+    const jobId = db.insertJob({ type: "research", name: "r", payload: '{"topic":"x"}' });
+    const runId = db.insertJobRun({ jobId, status: "running", nodeState: '{"node":1}' });
+    db.updateJobRun(runId, { status: "paused", nodeState: '{"node":2}', inputTokens: 100 });
+    const run = db.conn.prepare("SELECT * FROM job_runs WHERE id = ?").get(runId) as Record<string, unknown>;
+    expect(run.status).toBe("paused");
+    expect(run.node_state).toBe('{"node":2}');
+    expect(run.finished_at).toBeTruthy();
+    const artId = db.insertArtifact({ jobRunId: runId, kind: "report", title: "t", content: "# 报告" });
+    expect(artId).toBeGreaterThan(0);
+  });
+
+  it("全新库直建 v3（jobs 表存在且为空）", () => {
+    const db = mem();
+    expect(db.listJobs()).toEqual([]);
+    const v = db.conn.prepare("SELECT MAX(version) AS v FROM schema_version").get() as { v: number };
+    expect(v.v).toBe(3);
+  });
+});

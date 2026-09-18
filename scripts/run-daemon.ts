@@ -1,4 +1,4 @@
-/** 后台守护进程：周期 tick 扫描 sources 表，按 interval_s 调度采集。
+/** 后台守护进程：Job 内核 tick 调度（PLAN §11）——扫描 enabled jobs 按到期执行。
  *  单 Worker 串行（SQLite 单写 + 同域限速）；SIGINT/SIGTERM 排干在途任务后退出。
  *  用法：node scripts/run-daemon.ts [--config config/settings.yaml] [--log-file data/daemon.log] */
 import { spawn } from "node:child_process";
@@ -8,14 +8,15 @@ import { dirname, resolve } from "node:path";
 import { loadDotenv } from "../src/dotenv.ts";
 loadDotenv();
 
-import { BudgetExhausted, BudgetGuard } from "../src/budget.ts";
+import { BudgetGuard } from "../src/budget.ts";
 import { loadSettings, type Settings } from "../src/config.ts";
 import { DedupGate } from "../src/dedup.ts";
 import { Fetcher } from "../src/fetcher.ts";
-import { getSchema } from "../src/models/schemas.ts";
-import { Pipeline, isOkOutcome, type RunOutcome } from "../src/pipeline.ts";
+import { JobKernel, type JobContext } from "../src/jobs/kernel.ts";
+import { SourceExecutor } from "../src/jobs/sourceExecutor.ts";
+import { Pipeline } from "../src/pipeline.ts";
 import { createProviderStack } from "../src/providers/factory.ts";
-import { RunStatus } from "../src/status.ts";
+import { JobStatus } from "../src/status.ts";
 import { Database } from "../src/storage/db.ts";
 import { RunLedger } from "../src/storage/ledger.ts";
 import { RawStore } from "../src/storage/rawStore.ts";
@@ -32,18 +33,6 @@ function log(level: string, msg: string): void {
   else console.log(line);
 }
 
-export interface DaemonContext {
-  pipeline: Pipeline;
-  fetcher: Fetcher;
-  budget: BudgetGuard | null;
-  /** 串行 Worker：同一时刻只跑一个来源（SQLite 单写 + 同域限速） */
-  busy: Promise<void>;
-  lastRun: Map<string, number>;
-  tickS: number;
-  notifyEnabled: boolean;
-  clock: () => number;
-}
-
 function notify(title: string, message: string, enabled: boolean): void {
   if (!enabled) return;
   try {
@@ -56,85 +45,30 @@ function notify(title: string, message: string, enabled: boolean): void {
   }
 }
 
-interface SourceRow {
-  id: number;
-  url: string;
-  schema_type: string;
-  interval_s: number;
-  enabled: number;
-  use_browser: number;
-  instruction: string;
+export interface DaemonContext {
+  kernel: JobKernel;
+  /** webapp 的对话助手 / 发现 Agent 复用其 provider */
+  pipeline: Pipeline;
+  fetcher: Fetcher;
+  db: Database;
+  notifyEnabled: boolean;
+  tickS: number;
 }
 
-export function enabledSources(db: Database): SourceRow[] {
-  return db.conn
-    .prepare("SELECT * FROM sources WHERE enabled = 1 ORDER BY id")
-    .all() as unknown as SourceRow[];
-}
-
-export async function runSource(source: SourceRow, ctx: DaemonContext): Promise<RunOutcome | null> {
-  const job = async (): Promise<RunOutcome | null> => {
-    if (ctx.budget) {
-      try {
-        ctx.budget.check();
-      } catch (e) {
-        if (e instanceof BudgetExhausted) {
-          log("WARN", `预算熔断，跳过本次调度 ${source.url}：${e.message}`);
-          return null;
-        }
-        throw e;
+/** 任务执行上下文：BLOCKED / 异常 → 日志 + 可选 macOS 通知 */
+export function makeJobContext(ctx: DaemonContext): JobContext {
+  return {
+    db: ctx.db,
+    onEvent: (kind, message) => {
+      if (kind === "blocked") {
+        log("ERROR", `[BLOCKED] ${message}`);
+        notify("采集被目标站封锁", message, ctx.notifyEnabled);
+      } else {
+        log("ERROR", `任务异常 ${message}`);
+        notify("采集任务异常", message, ctx.notifyEnabled);
       }
-    }
-    let outcome: RunOutcome;
-    try {
-      outcome = await ctx.pipeline.run({
-        url: source.url,
-        schema: getSchema(source.schema_type),
-        instruction: source.instruction || "",
-        sourceId: source.id,
-        useBrowser: Boolean(source.use_browser),
-      });
-    } catch (e) {
-      // 硬性规则：任何任务的终态都入台账——getSchema 非法配置、认证失败等
-      // 异常在此兑换为 FETCH_ERROR 记录（pipeline.run 之外的错误路径）
-      log("ERROR", `任务异常 ${source.url}：${e instanceof Error ? e.name : "Error"}: ${e}`);
-      notify("采集任务异常", `${source.url}\n${e}`, ctx.notifyEnabled);
-      const failed: RunOutcome = {
-        status: RunStatus.FETCH_ERROR, url: source.url,
-        inputTokens: 0, outputTokens: 0, provider: "", model: "",
-        durationMs: 0,
-        error: `${e instanceof Error ? e.constructor?.name ?? "Error" : "Error"}: ${e}`,
-      };
-      ctx.pipeline.ledger?.record(failed, String(source.schema_type), source.id ?? null);
-      return failed;
-    }
-    if (outcome.status === RunStatus.BLOCKED) {
-      log("ERROR", `[BLOCKED] ${source.url}：${outcome.error}`);
-      notify("采集被目标站封锁", `${source.url}\n${outcome.error}`, ctx.notifyEnabled);
-    } else if (isOkOutcome(outcome.status)) {
-      log("INFO",
-        `[${outcome.status}] ${source.url} tokens=(${outcome.inputTokens},${outcome.outputTokens}) ${outcome.durationMs}ms run_id=${outcome.runId}`);
-    } else {
-      log("WARN", `[${outcome.status}] ${source.url} error=${outcome.error}`);
-    }
-    return outcome;
+    },
   };
-  // 串行 Worker：挂到 busy 链尾
-  const result = ctx.busy.then(job, job);
-  ctx.busy = result.then(() => undefined, () => undefined);
-  return result;
-}
-
-/** 扫描 sources 表：到期的启用来源各执行一次。
- *  lastRun 记派发时刻；到期按当次扫描的 interval_s 现算——改间隔下个 tick 生效。 */
-export async function runTick(ctx: DaemonContext, db: Database): Promise<void> {
-  const now = ctx.clock();
-  for (const src of enabledSources(db)) {
-    const last = ctx.lastRun.get(src.url);
-    if (last !== undefined && now < last + src.interval_s * 1000) continue;
-    ctx.lastRun.set(src.url, ctx.clock());
-    await runSource(src, ctx);
-  }
 }
 
 export function buildContext(settings: Settings, db: Database): DaemonContext {
@@ -144,9 +78,6 @@ export function buildContext(settings: Settings, db: Database): DaemonContext {
     fetchCfg.min_interval_per_host_s ?? 5,
     fetchCfg.respect_robots ?? true,
   );
-  const budget = settings.budget
-    ? new BudgetGuard(db, settings.budget.max_tasks_per_day, settings.budget.max_input_tokens_per_day)
-    : null;
   const pipeline = new Pipeline(
     fetcher,
     createProviderStack(settings.provider),
@@ -154,16 +85,30 @@ export function buildContext(settings: Settings, db: Database): DaemonContext {
     new DedupGate(db),
     new RunLedger(db),
   );
+  const budget = settings.budget
+    ? new BudgetGuard(db, settings.budget.max_tasks_per_day, settings.budget.max_input_tokens_per_day)
+    : null;
+  const kernel = new JobKernel(db, { source: new SourceExecutor(pipeline) }, budget);
   return {
+    kernel,
     pipeline,
     fetcher,
-    budget,
-    busy: Promise.resolve(),
-    lastRun: new Map(),
-    tickS: settings.scheduler?.tick_s ?? 30,
+    db,
     notifyEnabled: settings.alerts?.macos_notify ?? false,
-    clock: () => Date.now(),
+    tickS: settings.scheduler?.tick_s ?? 30,
   };
+}
+
+/** tick：完全委托内核（到期判断/串行/预算都在内核），此处只挂结果日志 */
+export async function runTick(ctx: DaemonContext): Promise<void> {
+  await ctx.kernel.tick(makeJobContext(ctx), (job, result) => {
+    if (result.status === JobStatus.SUCCESS) {
+      log("INFO", `[success] job#${job.id} ${job.type} ${job.name ?? ""} tokens=(${result.inputTokens},${result.outputTokens})`.trim());
+    } else if (result.status === JobStatus.SKIPPED) {
+      log("WARN", `[skipped] job#${job.id} ${job.name ?? ""} ${result.error ?? ""}`.trim());
+    }
+    // failed/paused 的细节已由 onEvent 或执行器日志输出
+  });
 }
 
 async function main(): Promise<number> {
@@ -181,12 +126,12 @@ async function main(): Promise<number> {
   }
   const ctx = buildContext(settings, db);
 
-  const sources = enabledSources(db);
-  if (sources.length === 0) {
-    log("ERROR", "sources 表无启用来源——先运行 scripts/import-sources.ts 迁移 sources.yaml");
+  const enabled = db.listJobs({ enabled: true });
+  if (enabled.length === 0) {
+    log("ERROR", "无启用的任务——先运行 scripts/import-sources.ts 迁移 sources.yaml，或在控制台添加来源");
     return 2;
   }
-  log("INFO", `启用来源 ${sources.length} 个：${sources.map((s) => s.url).join(", ")}`);
+  log("INFO", `启用任务 ${enabled.length} 个：${enabled.map((j) => `${j.type}#${j.id}`).join(", ")}`);
 
   let timer: NodeJS.Timeout | null = null;
   const shutdown = async (sig: string) => {
@@ -197,7 +142,6 @@ async function main(): Promise<number> {
     log("INFO", `收到 ${sig}，等待在途任务排干（再次发送可强制退出）`);
     if (timer) clearInterval(timer);
     timer = null;
-    await ctx.busy;
     await ctx.fetcher.close();
     db.close();
     log("INFO", "守护进程已退出");
@@ -206,9 +150,9 @@ async function main(): Promise<number> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  await runTick(ctx, db); // 首 tick 立即执行
+  await runTick(ctx); // 首 tick 立即执行
   timer = setInterval(() => {
-    runTick(ctx, db).catch((e) => log("ERROR", `tick 执行异常：${e}`));
+    runTick(ctx).catch((e) => log("ERROR", `tick 执行异常：${e}`));
   }, ctx.tickS * 1000);
   log("INFO", `守护进程已启动（tick=${ctx.tickS}s，Ctrl-C 优雅退出）`);
   return 0;

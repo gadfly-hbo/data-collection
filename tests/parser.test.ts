@@ -23,3 +23,20 @@ describe("parser 正文抽取", () => {
     expect(extractMarkdown("   \n  ")).toBeNull();
   });
 });
+
+describe("parser 链接密度防线（对齐 trafilatura favor_precision 语义）", () => {
+  it("HN 形态的链接列表 markdown → null（不消耗 LLM）", () => {
+    const hnLike = `<html><body><article><table>${Array.from({ length: 30 }, (_, i) =>
+      `<tr><td>${i + 1}.</td><td><a href="https://example.com/item${i}">Story Title Number ${i} Discussion</a></td>` +
+      `<td><a href="https://example.com/user${i}">user${i}</a></td></tr>`).join("")}</table></article></body></html>`;
+    expect(extractMarkdown(hnLike, "https://news.example")).toBeNull();
+  });
+});
+
+describe("parser 真实 HN 形态回归", () => {
+  it("hn_homepage fixture → null（链接密度防线）", () => {
+    const { readFileSync } = require("node:fs");
+    const html = readFileSync(join(FIXTURES, "hn_homepage.html"), "utf8");
+    expect(extractMarkdown(html, "https://news.ycombinator.com")).toBeNull();
+  });
+});
