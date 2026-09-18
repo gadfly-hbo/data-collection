@@ -8,8 +8,11 @@ import type { JobContext, JobExecutor, JobResult, JobRow } from "./kernel.ts";
 
 export class CustomExecutor implements JobExecutor {
   readonly type = "custom";
+  private readonly fetcher: Fetcher;
 
-  constructor(private readonly fetcher: Fetcher) {}
+  constructor(fetcher: Fetcher) {
+    this.fetcher = fetcher;
+  }
 
   async run(job: JobRow, ctx: JobContext): Promise<JobResult> {
     let payload: { connector?: string; params?: unknown; _wm?: string | null };

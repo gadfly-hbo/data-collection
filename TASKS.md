@@ -318,7 +318,7 @@
 - **验收**：[ ] live 实测；[ ] 页面改版容错（失败标记待修复）。
 ### T8.4 数据源页改造
 - **内容**：连接器卡片表单（按 demo）、dataset 预览与 CSV 导出。
-- **验收**：[ ] 添加→下一轮 tick 采集→预览可见全链路；[ ] 导出与库内一致。
+- **验收**：[x] 连接器市场/定制任务/预览全链路真实跑通：API 建任务(id3)→daemon 首 tick 入库 48 行 dataset（from:null→2026-09-18T23:00 水位推进，零 token）；UI 含 connector-market。[ ] dataset CSV 导出复用现有 /api/export 扩展（下一步补 kind=dataset）。
 
 **阶段闸门 8**：两类 connector 零 token 稳定入库 ≥48h；导出可用。
 

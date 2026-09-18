@@ -105,7 +105,7 @@ export function buildContext(settings: Settings, db: Database): DaemonContext {
 export async function runTick(ctx: DaemonContext): Promise<void> {
   await ctx.kernel.tick(makeJobContext(ctx), (job, result) => {
     if (result.status === JobStatus.SUCCESS) {
-      log("INFO", `[success] job#${job.id} ${job.type} ${job.name ?? ""} tokens=(${result.inputTokens},${result.outputTokens})`.trim());
+      log("INFO", `[success] job#${job.id} ${job.type} ${job.name ?? ""} tokens=(${result.inputTokens ?? 0},${result.outputTokens ?? 0})`.trim());
     } else if (result.status === JobStatus.SKIPPED) {
       log("WARN", `[skipped] job#${job.id} ${job.name ?? ""} ${result.error ?? ""}`.trim());
     }

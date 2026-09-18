@@ -89,6 +89,19 @@
         </div>
       </div>
       <div class="card">
+        <h2 class="card-title">连接器市场</h2>
+        <p class="page-desc" style="margin:0 0 10px">结构化数据源：确定性定时抓取，<b>零 token 成本</b>；添加后在下一个调度周期生效。</p>
+        <div id="connector-market"><p class="hint">加载连接器…</p></div>
+      </div>
+      <div class="card" id="custom-jobs-card" style="display:none">
+        <h2 class="card-title">定制数据任务</h2>
+        <table class="table" id="custom-jobs-table">
+          <thead><tr><th>名称</th><th>connector</th><th>频率</th><th>状态</th><th>最近运行</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="dataset-preview"></div>
+      </div>
+      <div class="card">
         <h2 class="card-title">已配置来源</h2>
         <table class="table" id="sources-table">
           <thead><tr>

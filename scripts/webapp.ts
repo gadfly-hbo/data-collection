@@ -147,6 +147,19 @@ export function createApp(
     res.json({ ok: true, id: jobId });
   });
 
+  app.get("/api/jobs", (req, res) => {
+    const type = (req.query.type as string) || "custom";
+    const rows = db.conn
+      .prepare(
+        `SELECT j.*,
+           (SELECT r.status FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_status,
+           (SELECT r.error FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_error,
+           (SELECT r.finished_at FROM job_runs r WHERE r.job_id = j.id ORDER BY r.id DESC LIMIT 1) AS last_run_at
+         FROM jobs j WHERE j.type = ? ORDER BY j.id`)
+      .all(type);
+    res.json(rows);
+  });
+
   app.get("/api/dataset/:jobId", (req, res) => {
     const job = db.getJob(Number(req.params.jobId));
     if (!job) return res.status(404).json({ detail: "任务不存在" });

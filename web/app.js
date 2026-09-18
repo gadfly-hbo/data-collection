@@ -417,5 +417,94 @@ setInterval(() => {
 }, 15000);
 
 loadSchemas()
-  .then(() => { refreshSummary(); refreshSources(); })
+  .then(() => { refreshSummary(); refreshSources(); refreshConnectors(); refreshCustomJobs(); })
   .catch((e) => console.error("初始化失败：", e));
+
+/* ---------- 连接器市场与定制数据任务（Phase 8） ---------- */
+async function refreshConnectors() {
+  try {
+    const list = await api("/api/connectors");
+    $("#connector-market").innerHTML = list.map((c) => `
+      <div class="plan-card" style="margin:8px 0" data-cid="${esc(c.id)}">
+        <h3>${esc(c.name)} <span class="badge badge-skip">${c.api ? "API · 零成本" : "网页"}</span></h3>
+        <p class="hint" style="margin:2px 0 8px">${esc(c.description)}</p>
+        <div class="form-row">
+          ${Object.entries(c.params).map(([key, spec]) => `
+            <div class="field"><label>${esc(key)}</label>
+              ${spec.options
+                ? `<select data-param="${esc(key)}">${spec.options.map((o) => `<option>${esc(o)}</option>`).join("")}</select>`
+                : `<input type="text" data-param="${esc(key)}">`}
+            </div>`).join("")}
+          <div class="field"><label>间隔（秒）</label>
+            <input type="number" data-interval value="${c.min_interval_s}" min="${c.min_interval_s}" step="60"></div>
+          <button class="btn btn-primary btn-mini" data-add="${esc(c.id)}">添加任务</button>
+        </div>
+      </div>`).join("");
+  } catch (e) { console.error(e); }
+}
+
+async function refreshCustomJobs() {
+  try {
+    const jobs = await api("/api/jobs?type=custom");
+    $("#custom-jobs-card").style.display = jobs.length ? "block" : "none";
+    $("#custom-jobs-table tbody").innerHTML = jobs.map((j) => `
+      <tr>
+        <td><b>${esc(j.name ?? "")}</b></td>
+        <td><span class="badge badge-skip">${esc((j.payload ? JSON.parse(j.payload).connector : "") || "-")}</span></td>
+        <td>${intervalLabel(JSON.parse(j.schedule).interval_s)}</td>
+        <td>${j.enabled ? "启用" : "停用"}</td>
+        <td>${j.last_status ? badge(j.last_status === "success" ? "SUCCESS" : "FETCH_ERROR") : "—"}
+            <span class="hint">${esc(j.last_run_at ?? "")}</span></td>
+        <td class="row-actions">
+          <button data-act="preview" data-id="${j.id}">预览</button>
+          ${j.enabled ? `<button data-act="disable" data-id="${j.id}">停用</button>` : ""}
+        </td>
+      </tr>`).join("");
+  } catch (e) { console.error(e); }
+}
+
+$("#connector-market").addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-add]");
+  if (!btn) return;
+  const card = btn.closest(".plan-card");
+  const cid = btn.dataset.add;
+  const params = {};
+  card.querySelectorAll("[data-param]").forEach((el) => { params[el.dataset.param] = el.value; });
+  const interval = Number(card.querySelector("[data-interval]").value);
+  try {
+    await api("/api/jobs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ connector: cid, params, interval_s: interval }),
+    });
+    btn.textContent = "已添加";
+    refreshCustomJobs();
+  } catch (e) { alert(`添加失败：${e.message}`); }
+});
+
+$("#custom-jobs-table").addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  try {
+    if (btn.dataset.act === "disable") {
+      await api(`/api/jobs/${id}`, { method: "DELETE" });
+      refreshCustomJobs();
+    } else if (btn.dataset.act === "preview") {
+      const data = await api(`/api/dataset/${id}`);
+      const rows = data.rows.slice(-10);
+      $("#dataset-preview").innerHTML = data.rows.length
+        ? `<h3 class="card-title" style="margin-top:12px">数据预览（最近 ${rows.length} 条，共 ${data.rows.length} 条）</h3>
+           <table class="table"><thead><tr><th>时间</th>${Object.keys(data.rows[0].values).map((k) => `<th>${esc(k)}</th>`).join("")}</tr></thead>
+           <tbody>${rows.map((r) => `<tr><td>${esc(r.ts)}</td>${Object.values(r.values).map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : '<p class="hint">尚无数据（任务未到期或抓取失败，见错误列）</p>';
+    }
+  } catch (e) { alert(`操作失败：${e.message}`); }
+});
+
+// 页面切换时刷新连接器/任务（来源管理页）
+const _origGo = window.go;
+window.go = function (name) {
+  _origGo(name);
+  if (name === "sources") { refreshConnectors(); refreshCustomJobs(); }
+};
+
