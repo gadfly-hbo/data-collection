@@ -156,8 +156,6 @@ def build_context(settings: dict, *,
 
 
 async def main_async(args) -> int:
-    logging.basicConfig(level=getattr(logging, args.log_level.upper()),
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     try:
         settings = yaml.safe_load((REPO_ROOT / args.config).read_text())
         ctx, db = build_context(settings)
@@ -204,7 +202,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="定时采集守护进程（sources 表驱动）")
     parser.add_argument("--config", default="config/settings.yaml")
     parser.add_argument("--log-level", default="INFO")
-    return asyncio.run(main_async(parser.parse_args()))
+    parser.add_argument("--log-file", default=None,
+                        help="日志写入文件（后台长期观测用）；缺省输出到终端")
+    args = parser.parse_args()
+
+    fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
+    if args.log_file:
+        logfile = pathlib.Path(args.log_file)
+        if not logfile.is_absolute():
+            logfile = REPO_ROOT / logfile
+        logfile.parent.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(level=getattr(logging, args.log_level.upper()),
+                            format=fmt, filename=str(logfile))
+    else:
+        logging.basicConfig(level=getattr(logging, args.log_level.upper()), format=fmt)
+    return asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
