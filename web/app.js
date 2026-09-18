@@ -44,18 +44,18 @@ function intervalLabel(seconds) {
 }
 
 /* ---------- 侧边栏导航 ---------- */
-$$(".nav-item").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    $$(".nav-item").forEach((b) => b.classList.toggle("active", b === btn));
-    $$(".page").forEach((p) =>
-      p.classList.toggle("active", p.id === `page-${btn.dataset.page}`));
-    if (btn.dataset.page === "runs") refreshRuns();
-    if (btn.dataset.page === "data") refreshItems();
-    if (btn.dataset.page === "sources") { refreshSources(); refreshConnectors(); refreshCustomJobs(); }
-    if (btn.dataset.page === "overview") refreshOverview();
-    if (btn.dataset.page === "research") refreshResearchJobs();
-  });
-});
+/** 统一页面分发器：侧栏 / 场景卡 / 待办链接 / 程序化跳转全部走这里 */
+function go(name) {
+  $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
+  $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
+  window.scrollTo(0, 0);
+  if (name === "runs") refreshRuns();
+  if (name === "data") refreshItems();
+  if (name === "sources") { refreshSources(); refreshConnectors(); refreshCustomJobs(); }
+  if (name === "overview") refreshOverview();
+  if (name === "research") refreshResearchJobs();
+}
+$$(".nav-item").forEach((btn) => btn.addEventListener("click", () => go(btn.dataset.page)));
 
 /* ---------- Schema 下拉（来自后端注册表） ---------- */
 async function loadSchemas() {
@@ -508,11 +508,6 @@ $("#custom-jobs-table").addEventListener("click", async (event) => {
 });
 
 // 页面切换时刷新连接器/任务（来源管理页）
-const _origGo = window.go;
-window.go = function (name) {
-  _origGo(name);
-  if (name === "sources") { refreshConnectors(); refreshCustomJobs(); }
-};
 
 
 /* ---------- 研究工作台（Phase 10 切片2） ---------- */
@@ -645,11 +640,6 @@ function renderReport(d) {
       onclick="location.href='/api/export/report/${d.artifactId}'">⬇ 导出报告 .md</button>` : ""}`;
 }
 
-const _goPrev = window.go;
-window.go = function (name) {
-  _goPrev(name);
-  if (name === "research") refreshResearchJobs();
-};
 
 async function refreshOverview() {
   try {
