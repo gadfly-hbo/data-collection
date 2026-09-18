@@ -323,3 +323,25 @@ describe("webapp：研究任务端点", () => {
     db.close();
   });
 });
+
+describe("webapp：报告导出与证据透出", () => {
+  it("GET /api/research/jobs/:id 带 evidence；导出 .md 下载", async () => {
+    const db = new Database(":memory:");
+    const jobId = db.insertJob({ type: "research", name: "r",
+      payload: '{"template":"district-research","topic":"T"}' });
+    const runId = db.insertJobRun({ jobId, status: "success" });
+    db.insertArtifact({ jobRunId: runId, kind: "report", title: "商圈研究：T",
+      content: "# 报告\n[A1.1] 【来源/2026】【等级 A】 事实。来源：https://a.example/x" });
+    await withApp(db, {}, async (base) => {
+      const detail = await (await fetch(`${base}/api/research/jobs/${jobId}`)).json();
+      expect(detail.evidence).toHaveLength(1);
+      expect(detail.evidence[0].grade).toBe("A");
+
+      const exp = await fetch(`${base}/api/export/report/${(db.conn.prepare("SELECT id FROM artifacts LIMIT 1").get() as { id: number }).id}`);
+      expect(exp.status).toBe(200);
+      expect(exp.headers.get("content-disposition")).toContain(".md");
+      expect((await exp.text())).toContain("[A1.1]");
+    });
+    db.close();
+  });
+});

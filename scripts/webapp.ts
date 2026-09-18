@@ -15,6 +15,7 @@ import { JobStatus } from "../src/status.ts";
 import { SCHEMA_REGISTRY } from "../src/models/schemas.ts";
 import { CONNECTOR_REGISTRY, getConnector } from "../src/connectors/registry.ts";
 import { listTemplates, RESEARCH_TEMPLATES } from "../src/research/templates/index.ts";
+import { parseEvidence } from "../src/research/evidence.ts";
 
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
@@ -149,9 +150,16 @@ export function createApp(
       "SELECT id, status, node_state, input_tokens, output_tokens, error, finished_at FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT 1")
       .get(Number(job.id)) as Record<string, unknown> | undefined;
     const report = db.conn.prepare(
-      `SELECT a.content FROM artifacts a JOIN job_runs r ON a.job_run_id = r.id
+      `SELECT a.id, a.content, a.meta FROM artifacts a JOIN job_runs r ON a.job_run_id = r.id
        WHERE r.job_id = ? AND a.kind = 'report' ORDER BY a.id DESC LIMIT 1`)
-      .get(Number(job.id)) as { content: string } | undefined;
+      .get(Number(job.id)) as { id: number; content: string; meta: string | null } | undefined;
+    let evidence: unknown[] = [];
+    if (report) {
+      try {
+        evidence = (JSON.parse(String(report.meta ?? "{}")).evidence as unknown[]) ?? [];
+      } catch { /* meta 缺字段 */ }
+      if (!evidence.length) evidence = parseEvidence(report.content);
+    }
     let nodeTitles: Record<string, string> = {};
     try {
       const tpl = RESEARCH_TEMPLATES[String(JSON.parse(String(job.payload)).template)];
@@ -168,7 +176,7 @@ export function createApp(
                      total: Object.keys(nodes).length };
       } catch { /* 快照损坏时降级为空进度 */ }
     }
-    res.json({ job, run: run ?? null, nodes, nodeTitles, progress, report: report?.content ?? null });
+    res.json({ job, run: run ?? null, nodes, nodeTitles, progress, evidence, report: report?.content ?? null, artifactId: report?.id ?? null });
   });
 
   const researchActivate = (id: number, res: import("express").Response) => {
@@ -227,6 +235,15 @@ export function createApp(
          FROM jobs j WHERE j.type = ? ORDER BY j.id`)
       .all(type);
     res.json(rows);
+  });
+
+  app.get("/api/export/report/:artifactId", (req, res) => {
+    const art = db.conn.prepare("SELECT title, content FROM artifacts WHERE id = ? AND kind = 'report'")
+      .get(Number(req.params.artifactId)) as { title: string | null; content: string } | undefined;
+    if (!art) return res.status(404).json({ detail: "报告不存在" });
+    res.setHeader("Content-Disposition", 'attachment; filename="report.md"');
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.send(`# ${art.title ?? "研究报告"}\n\n${art.content}`);
   });
 
   app.get("/api/dataset/:jobId", (req, res) => {

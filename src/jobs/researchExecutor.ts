@@ -6,6 +6,7 @@ import { z } from "zod";
 import { JobStatus } from "../status.ts";
 import { initialState, validateTemplate, WorkflowEngine, type NodeRunner, type WorkflowState } from "../research/engine.ts";
 import { assertSearchToolsAvailable, type PrecheckResult } from "../research/mcpPrecheck.ts";
+import { parseEvidence } from "../research/evidence.ts";
 import { RESEARCH_TEMPLATES } from "../research/templates/index.ts";
 import type { Database } from "../storage/db.ts";
 import type { JobContext, JobExecutor, JobResult, JobRow } from "./kernel.ts";
@@ -104,7 +105,8 @@ export class ResearchExecutor implements JobExecutor {
           title: `${template.name}：${payload.topic}`,
           content: result.report,
           meta: JSON.stringify({ template: template.id, topic: payload.topic,
-                                 inputTokens: result.inputTokens, outputTokens: result.outputTokens }),
+                                 inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+                                 evidence: parseEvidence(result.report) }),
         });
       }
       return {

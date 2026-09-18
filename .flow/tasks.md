@@ -12,7 +12,7 @@
   - **覆盖故事**: 2(列表),4,5,8,14
   - engine `onNode` 回调 → executor 每节点完成即 UPDATE 当前 running job_runs.node_state；`GET /api/research/jobs/:id` 返回 nodes 摘要+last_error；工作台页：任务列表（状态徽标/进度 x/y 节点）+ 详情（spectrum 条+node-chain+暂停原因+续跑按钮，running 时 10s 自动刷新）。测试：假执行器跑 district 模板断言每节点都有持久化快照；端点契约；resume 端点驱动。
 
-- [ ] 3. 结构化证据 + 报告预览 + Markdown 导出
+- [x] 3. 结构化证据 + 报告预览 + Markdown 导出
   - **Blocked by**: 2
   - **覆盖故事**: 6,7,9(报告),15
   - executor 完成后从 research/fix 输出行式解析证据数组（编号/等级/URL/内容）写入 artifacts.meta；`GET /api/export/report/:artifactId` .md 下载；详情端点带 evidence；UI 报告页：证据表（等级徽标+可点来源）+ 缺口提示（末段）+ 报告正文；无 evidence 时降级纯 Markdown。测试：解析器夹具（job#4 风格文本）、端点、导出头。

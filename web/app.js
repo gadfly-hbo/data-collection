@@ -569,6 +569,7 @@ async function openResearch(id) {
         ? `<div class="notice warn">⏸ 暂停：${esc(d.run.error)}
            <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${id})">▶ 续跑</button></div>` : ""}
       ${d.job.enabled ? "" : `<div class="notice">ℹ 待确认任务：<button class="btn btn-primary btn-mini" onclick="confirmResearch(${id})">确认并开始</button></div>`}
+      ${renderReport(d)}
       <p class="hint" style="margin-top:8px">状态每 10 秒自动刷新（进行中）</p>`;
     if (running) researchTimer = setInterval(() => openResearch(id), 10000);
   } catch (e) { console.error(e); }
@@ -583,6 +584,29 @@ async function confirmResearch(id) {
   catch (e) { alert(`确认失败：${e.message}`); }
 }
 function toggleNewResearch() { /* 切片4 实现发起表单 */ }
+
+const GRADE_BADGE = { A: "teal", B: "brand", C: "warn" };
+function renderReport(d) {
+  if (!d.report) return "";
+  const gaps = (d.report.match(/数据缺口[\s\S]{0,200}/) || [""])[0];
+  const table = (d.evidence && d.evidence.length)
+    ? `<h2 class="card-title" style="margin-top:12px">证据表（${d.evidence.length} 条）</h2>
+       <table class="table"><thead><tr><th style="width:70px">编号</th><th style="width:88px">等级</th>
+       <th style="width:170px">来源</th><th>内容</th></tr></thead><tbody>
+       ${d.evidence.map((e) => `<tr><td>${esc(e.id)}</td>
+         <td><span class="badge badge-${GRADE_BADGE[e.grade] || "skip"}">${esc(e.grade)}级</span></td>
+         <td>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.source)}</a>` : esc(e.source)}</td>
+         <td>${esc(e.text)}</td></tr>`).join("")}
+       </tbody></table>`
+    : '<p class="hint" style="margin-top:10px">未解析到结构化证据（旧报告），以下为原文：</p>';
+  return `
+    ${gaps ? `<div class="notice warn">⚠ 数据缺口：${esc(gaps.replace(/数据缺口[:：]?\s*/, "").trim().slice(0, 160))}</div>` : ""}
+    ${table}
+    <details${d.evidence && d.evidence.length ? "" : " open"}><summary>报告全文（Markdown）</summary>
+      <pre style="white-space:pre-wrap">${esc(d.report.slice(0, 8000))}</pre></details>
+    ${d.artifactId ? `<button class="btn btn-secondary btn-mini" style="margin-top:8px"
+      onclick="location.href='/api/export/report/${d.artifactId}'">⬇ 导出报告 .md</button>` : ""}`;
+}
 
 const _goPrev = window.go;
 window.go = function (name) {
