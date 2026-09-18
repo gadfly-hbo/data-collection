@@ -95,9 +95,18 @@ export async function runSource(source: SourceRow, ctx: DaemonContext): Promise<
         useBrowser: Boolean(source.use_browser),
       });
     } catch (e) {
+      // 硬性规则：任何任务的终态都入台账——getSchema 非法配置、认证失败等
+      // 异常在此兑换为 FETCH_ERROR 记录（pipeline.run 之外的错误路径）
       log("ERROR", `任务异常 ${source.url}：${e instanceof Error ? e.name : "Error"}: ${e}`);
       notify("采集任务异常", `${source.url}\n${e}`, ctx.notifyEnabled);
-      return null;
+      const failed: RunOutcome = {
+        status: RunStatus.FETCH_ERROR, url: source.url,
+        inputTokens: 0, outputTokens: 0, provider: "", model: "",
+        durationMs: 0,
+        error: `${e instanceof Error ? e.constructor?.name ?? "Error" : "Error"}: ${e}`,
+      };
+      ctx.pipeline.ledger?.record(failed, String(source.schema_type), source.id ?? null);
+      return failed;
     }
     if (outcome.status === RunStatus.BLOCKED) {
       log("ERROR", `[BLOCKED] ${source.url}：${outcome.error}`);

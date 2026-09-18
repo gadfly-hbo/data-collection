@@ -99,6 +99,18 @@
         </table>
       </div>
       <div class="card">
+        <h2 class="card-title">来源发现</h2>
+        <p class="page-desc" style="margin:0 0 10px">输入关注主题，发现助手联网检索候选来源；<b>逐个确认后</b>才会加入调度。</p>
+        <div class="form-row">
+          <div class="field" style="flex:1 1 300px">
+            <label for="discover-topic">主题</label>
+            <input id="discover-topic" type="text" placeholder="如：AI 监管政策动态">
+          </div>
+          <button class="btn btn-primary" id="discover-btn">🔍 发现来源</button>
+        </div>
+        <div id="discover-results"></div>
+      </div>
+      <div class="card">
         <h2 class="card-title">新增 / 更新来源</h2>
         <form id="source-form" class="form-row">
           <div class="field" style="flex:1 1 300px">

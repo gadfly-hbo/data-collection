@@ -54,12 +54,23 @@ describe("daemon：单来源任务", () => {
     expect(seen[0].useBrowser).toBe(true);
   });
 
-  it("非法 schema_type 隔离：单来源报错不影响其余来源", async () => {
+  it("非法 schema_type：兑换 FETCH_ERROR 入台账，不中断其余来源", async () => {
     const calls: string[] = [];
-    const pipeline = { run: async (t: { url: string }) => { calls.push(t.url); return okOutcome(t.url); } };
+    const ledgerRows: { status: string; schemaType: string }[] = [];
+    const pipeline = {
+      run: async (t: { url: string }) => { calls.push(t.url); return okOutcome(t.url); },
+      ledger: {
+        record: (o: RunOutcome, s: string) => {
+          ledgerRows.push({ status: o.status, schemaType: s });
+          return 1;
+        },
+      },
+    };
     const ctx = fakeCtx(pipeline);
     const bad = await runSource(src({ url: "https://bad.example", schema_type: "Nope" }), ctx);
-    expect(bad).toBeNull();
+    expect(bad?.status).toBe(RunStatus.FETCH_ERROR); // 硬性规则：异常路径也入账
+    expect(ledgerRows).toEqual([{ status: RunStatus.FETCH_ERROR, schemaType: "Nope" }]);
+    expect(bad?.error).toContain("Nope");
     const good = await runSource(src({ url: "https://good.example" }), ctx);
     expect(good?.status).toBe(RunStatus.SUCCESS);
     expect(calls).toEqual(["https://good.example"]); // 坏来源未进 pipeline

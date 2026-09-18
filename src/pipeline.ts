@@ -9,6 +9,7 @@ import {
   type LlmProvider,
   UsageReportedError,
 } from "./providers/base.ts";
+import { SCHEMA_REGISTRY } from "./models/schemas.ts";
 import { RunStatus } from "./status.ts";
 import type { RunLedger } from "./storage/ledger.ts";
 import type { RawStore } from "./storage/rawStore.ts";
@@ -202,12 +203,9 @@ export class Pipeline {
 
 function schemaName(schema: ZodType): string {
   // 注册表反查类名（台账与去重键使用）
-  const found = Object.entries(schemaRegistryRef).find(([, v]) => v === schema);
+  const found = Object.entries(SCHEMA_REGISTRY).find(([, v]) => v === schema);
   return found?.[0] ?? schema.constructor.name;
 }
-
-/** pipeline 需要反查注册表名；延迟引入避免循环依赖。 */
-import { SCHEMA_REGISTRY as schemaRegistryRef } from "./models/schemas.ts";
 
 function stamp(item: Record<string, unknown>, sourceUrl: string): Record<string, unknown> {
   // 追溯字段以系统为准：LLM 输出中的同名值一律覆盖

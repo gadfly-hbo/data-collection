@@ -10,6 +10,7 @@ loadDotenv();
 
 import { BudgetExhausted } from "../src/budget.ts";
 import { loadSettings, type Settings } from "../src/config.ts";
+import { isOkOutcome } from "../src/pipeline.ts";
 import { SCHEMA_REGISTRY } from "../src/models/schemas.ts";
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
@@ -126,9 +127,10 @@ export function createApp(
     try {
       const outcome = await runSource(source as never, ctx);
       if (!outcome) {
-        return res.json({ ok: false, error: "任务被跳过（预算熔断或来源配置非法，详见日志/台账）" });
+        return res.json({ ok: false,
+          error: "任务被预算熔断跳过（未消耗 LLM 调用，详见日志；台账不记跳过属设计口径）" });
       }
-      res.json({ ok: isOkResult(outcome.status), ...outcome });
+      res.json({ ok: isOkOutcome(outcome.status), ...outcome });
     } catch (e) {
       if (e instanceof BudgetExhausted) return res.status(409).json({ detail: e.message });
       throw e;
@@ -217,10 +219,6 @@ export function createApp(
     app.locals.tickTimer = timer;
   }
   return app;
-}
-
-function isOkResult(status: string): boolean {
-  return status === "SUCCESS" || status.startsWith("SKIPPED");
 }
 
 async function main(): Promise<void> {

@@ -303,6 +303,64 @@ $("#source-form").addEventListener("submit", async (event) => {
   } catch (e) { alert(`保存失败：${e.message}`); }
 });
 
+/* ---------- 来源发现（候选 → 确认入库） ---------- */
+let discoverCandidates = [];
+
+$("#discover-btn").addEventListener("click", async () => {
+  const topic = $("#discover-topic").value.trim();
+  const box = $("#discover-results");
+  if (!topic) { box.innerHTML = '<p class="hint">请先输入主题。</p>'; return; }
+  const btn = $("#discover-btn");
+  btn.disabled = true; btn.textContent = "检索中（约 30~90 秒）…";
+  box.innerHTML = "";
+  try {
+    const data = await api("/api/discover", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({topic}),
+    });
+    if (!data.candidates.length) {
+      box.innerHTML = '<p class="hint">未发现合适候选（可换主题重试）。</p>';
+      return;
+    }
+    discoverCandidates = data.candidates;
+    box.innerHTML = data.candidates.map((c, i) => `
+      <div class="plan-card" data-idx="${i}">
+        <h3>候选 ${i + 1}</h3>
+        <dl>
+          <dt>名称</dt><dd>${esc(c.name)}</dd>
+          <dt>网址</dt><dd>${esc(c.url)}</dd>
+          <dt>数据类型</dt><dd>${esc(c.schema_type)}</dd>
+          <dt>理由</dt><dd>${esc(c.reason)}</dd>
+        </dl>
+        <div class="plan-actions">
+          <button class="btn btn-primary btn-mini" data-act="add">➕ 添加为来源（每天采集）</button>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<p class="hint">发现失败：${esc(e.message)}</p>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "🔍 发现来源";
+  }
+});
+
+$("#discover-results").addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-act='add']");
+  if (!btn) return;
+  const card = btn.closest(".plan-card");
+  const idx = Number(card.dataset.idx);
+  const c = discoverCandidates[idx];
+  try {
+    await api("/api/sources", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url: c.url, name: c.name, schema_type: c.schema_type,
+                            interval_s: 86400, enabled: true}),
+    });
+    card.querySelector(".plan-actions").innerHTML = '<span class="hint">✅ 已添加（每天 86400s），可在下表调整</span>';
+    refreshSources();
+  } catch (e) { alert(`添加失败：${e.message}`); }
+  void idx;
+});
+
 /* ---------- 运行记录 ---------- */
 async function refreshRuns() {
   try {

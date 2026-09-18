@@ -19,10 +19,8 @@
     "webapp": "node scripts/webapp.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
     "express": "^4.21.2",
     "linkedom": "^0.18.13",
