@@ -55,6 +55,17 @@ describe("research/agentRunner：pi SDK 节点执行器", () => {
     expect(r.inputTokens).toBe(1200);
   });
 
+  it("事件缺失时从消息 toolCall 块收集工具证据", async () => {
+    const session: AgentSessionLike = {
+      messages: [{ role: "assistant", stopReason: "stop", usage: { input: 1, output: 1 },
+        content: [{ type: "toolCall", name: "minimax_web_search" },
+                  { type: "text", text: "检索结果汇总" }] }],
+      async prompt() {}, subscribe() {},
+    };
+    const r = await makeAgentRunner({ sessionFactory: async () => session })("任务");
+    expect(r.usedTools).toContain("minimax_web_search");
+  });
+
   it("stopReason=error → 抛出（引擎转暂停续跑）", async () => {
     const { factory } = fakeSession({ error: "429 配额" });
     await expect(makeAgentRunner({ sessionFactory: factory })("任务")).rejects.toThrow(/429/);

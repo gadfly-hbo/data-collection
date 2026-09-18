@@ -40,6 +40,18 @@ export function makeAgentRunner(
       await Promise.race([session.prompt(`${SYSTEM}\n\n---\n\n${prompt}`), timer]);
 
       const assistants = session.messages.filter((m) => m.role === "assistant");
+      // 双通道收集工具证据：事件流 + assistant 消息内的 toolCall/tool_use 块
+      // （不同 pi 版本事件形状不同，消息块是稳定面——缺失曾致真实运行误拦）
+      for (const m of assistants) {
+        const content = m.content;
+        if (!Array.isArray(content)) continue;
+        for (const b of content as { type?: string; name?: string; toolName?: string }[]) {
+          if (b.type && /tool/i.test(b.type)) {
+            const name = b.name ?? b.toolName;
+            if (name && !usedTools.includes(name)) usedTools.push(name);
+          }
+        }
+      }
       const last = assistants[assistants.length - 1];
       if (last?.stopReason === "error") {
         throw new Error(`供应商错误：${last.errorMessage ?? "未知"}`);
