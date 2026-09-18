@@ -51,8 +51,9 @@ $$(".nav-item").forEach((btn) => {
       p.classList.toggle("active", p.id === `page-${btn.dataset.page}`));
     if (btn.dataset.page === "runs") refreshRuns();
     if (btn.dataset.page === "data") refreshItems();
-    if (btn.dataset.page === "sources") refreshSources();
+    if (btn.dataset.page === "sources") { refreshSources(); refreshConnectors(); refreshCustomJobs(); }
     if (btn.dataset.page === "overview") refreshOverview();
+    if (btn.dataset.page === "research") refreshResearchJobs();
   });
 });
 
@@ -72,24 +73,6 @@ async function loadSchemas() {
 }
 
 /* ---------- 今日概览 ---------- */
-async function refreshSummary() {
-  try {
-    const data = await api("/api/summary");
-    const s = data.summary;
-    $("#summary").innerHTML = `
-      <div class="metric"><div class="v">${s.total}</div><div class="k">总任务数</div></div>
-      <div class="metric"><div class="v">${Math.round(s.success_rate * 100)}%</div><div class="k">成功率</div></div>
-      <div class="metric"><div class="v">${s.today_tasks}</div><div class="k">今日 LLM 任务</div></div>
-      <div class="metric"><div class="v">${s.today_input_tokens.toLocaleString()}</div><div class="k">今日 input tokens</div></div>`;
-    $("#blocked").style.display = data.blocked.length ? "flex" : "none";
-    if (data.blocked.length) {
-      $("#blocked").textContent =
-        `⚠ 被封锁来源（最近）：${data.blocked.map((b) => b.url).join("、")}`;
-    }
-  } catch (e) {
-    $("#summary").innerHTML = `<p class="hint">加载失败：${esc(e.message)}</p>`;
-  }
-}
 
 /* ---------- 对话助手 ---------- */
 const chatHistory = [];
@@ -156,7 +139,7 @@ function bindPlanCard(container, plan) {
         addMsg("assistant",
           `已创建「${esc(plan.name)}」并完成首次采集：${badge(run.status)}${detail}<span class="meta">tokens ${run.input_tokens}/${run.output_tokens}｜${run.duration_ms}ms</span>`);
       }
-      refreshSources(); refreshSummary();
+      refreshSources(); refreshOverview();
       container.querySelector(".plan-actions").remove();
     } catch (e) {
       addMsg("assistant", `创建失败：${esc(e.message)}`);
@@ -248,7 +231,7 @@ $("#run-form").addEventListener("submit", async (event) => {
       <p>${badge(data.status)}｜${esc(data.url)}｜tokens ${data.input_tokens}/${data.output_tokens}｜${data.duration_ms}ms</p>
       ${data.error ? `<p class="hint">原因：${esc(data.error)}</p>` : ""}
       ${itemRows ? `<table class="table"><tbody>${itemRows}</tbody></table>` : ""}`;
-    refreshSummary(); refreshRuns();
+    refreshOverview(); refreshRuns();
   } catch (e) {
     box.style.display = "block";
     box.innerHTML = `<p class="hint">执行失败：${esc(e.message)}</p>`;
@@ -303,7 +286,7 @@ $("#sources-table").addEventListener("click", async (event) => {
       if (!confirm("删除该来源后，其关联台账仍保留，但不再自动采集。确认删除？")) return;
       await api(`/api/sources/${id}`, {method: "DELETE"});
     }
-    refreshSources(); refreshSummary();
+    refreshSources(); refreshOverview();
   } catch (e) { alert(`操作失败：${e.message}`); }
 });
 
@@ -440,7 +423,7 @@ setInterval(() => {
 }, 15000);
 
 loadSchemas()
-  .then(() => { refreshOverview(); refreshSummary(); refreshSources(); refreshConnectors(); refreshCustomJobs(); })
+  .then(() => { refreshOverview(); refreshSources(); refreshConnectors(); refreshCustomJobs(); })
   .catch((e) => console.error("初始化失败：", e));
 
 /* ---------- 连接器市场与定制数据任务（Phase 8） ---------- */

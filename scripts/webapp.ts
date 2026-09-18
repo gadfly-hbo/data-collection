@@ -61,7 +61,8 @@ export function createApp(
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  // 前端静态资源
+  // 前端静态资源：/static/* 为 HTML 引用面（FastAPI→Express 移植时曾丢失挂载），根路径兼容保留
+  app.use("/static", express.static(WEB_DIR));
   app.use(express.static(WEB_DIR));
   app.get("/", (_req, res) => res.sendFile(resolve(WEB_DIR, "index.html")));
 
