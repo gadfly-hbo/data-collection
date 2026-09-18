@@ -172,7 +172,7 @@ $("#chat-log").addEventListener("click", async (event) => {
   const draft = JSON.parse(btn.dataset.research);
   try {
     const r = await api("/api/research", { method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ template: draft.template, topic: draft.topic }) });
+      body: JSON.stringify({ template: draft.template, topic: draft.topic, max_input_tokens: 250000 }) });
     btn.closest(".plan-actions").innerHTML = `<span class="hint">✅ 已创建 #${r.id} —— </span><button class="btn btn-secondary btn-mini" onclick="go(\x27research\x27)">去研究工作台确认 ▸</button>`;
     refreshOverview && refreshOverview();
   } catch (e) { alert(`创建失败：${e.message}`); }
@@ -207,7 +207,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
         <div class="plan-card">
           <h3>研究任务草稿（${esc(data.research.template)}）</h3>
           <dl><dt>研究对象</dt><dd>${esc(data.research.topic)}</dd>
-              <dt>执行方式</dt><dd>确认后进入研究工作台多节点执行，token 预算默认 25 万</dd></dl>
+              <dt>执行方式</dt><dd>确认后进入研究工作台多节点执行，token 预算 25 万（标准档）</dd></dl>
           <div class="plan-actions">
             <button class="btn btn-primary btn-mini" data-research='${esc(JSON.stringify(data.research))}'>➕ 创建并去确认</button>
           </div>
@@ -479,7 +479,7 @@ async function refreshCustomJobs() {
         <td>${j.last_status ? badge(j.last_status === "success" ? "SUCCESS" : "FETCH_ERROR") : "—"}
             <span class="hint">${esc(j.last_run_at ?? "")}</span></td>
         <td class="row-actions">
-          <button data-act="preview" data-id="${j.id}">预览</button>
+          <button data-act="preview" data-id="${j.id}">预览</button> <a class="btn btn-secondary btn-mini" href="/api/export/dataset/${j.id}" download>CSV</a>
           ${j.enabled ? `<button data-act="disable" data-id="${j.id}">停用</button>` : ""}
         </td>
       </tr>`).join("");
@@ -591,7 +591,7 @@ async function openResearch(id) {
       ${d.run && d.run.status === "paused" && d.run.error
         ? `<div class="notice warn">⏸ 暂停：${esc(d.run.error)}
            <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${id})">▶ 续跑</button></div>` : ""}
-      ${d.job.enabled ? "" : `<div class="notice">ℹ 待确认任务：<button class="btn btn-primary btn-mini" onclick="confirmResearch(${id})">确认并开始</button></div>`}
+      ${d.job.enabled ? "" : `<div class="notice">ℹ 待确认任务：<button class="btn btn-secondary btn-mini" onclick="confirmResearch(${id})">确认并开始</button></div>`}
       ${renderReport(d)}
       <p class="hint" style="margin-top:8px">状态每 10 秒自动刷新（进行中）</p>`;
     if (running) researchTimer = setInterval(() => openResearch(id), 10000);
@@ -653,7 +653,8 @@ function renderReport(d) {
        </tbody></table>`
     : '<p class="hint" style="margin-top:10px">未解析到结构化证据（旧报告），以下为原文：</p>';
   return `
-    ${gaps ? `<div class="notice warn">⚠ 数据缺口：${esc(gaps.replace(/数据缺口[:：]?\s*/, "").trim().slice(0, 160))}</div>` : ""}
+    ${gaps ? `<div class="notice warn">⚠ 数据缺口：${esc(gaps.replace(/数据缺口[:：]?\s*/, "").trim().slice(0, 160))}
+      <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${d.job.id})">▶ 续跑补证</button></div>` : ""}
     ${table}
     <details${d.evidence && d.evidence.length ? "" : " open"}><summary>报告全文（Markdown）</summary>
       <pre style="white-space:pre-wrap">${esc(d.report.slice(0, 8000))}</pre></details>

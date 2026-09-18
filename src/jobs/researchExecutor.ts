@@ -78,6 +78,11 @@ export class ResearchExecutor implements JobExecutor {
       state = initialState(template);
     }
 
+    // 初始快照先落库：UI 从第一秒就能渲染完整节点链
+    if (ctx.jobRunId != null) {
+      ctx.db.conn.prepare("UPDATE job_runs SET node_state = ? WHERE id = ?")
+        .run(JSON.stringify(state), ctx.jobRunId);
+    }
     const engine = new WorkflowEngine(template, this.makeRunner(), payload.topic,
                                       payload.maxInputTokens ?? 400_000);
     // 增量快照：每节点完成即持久化到当前 running 行（崩溃/长任务可观测）

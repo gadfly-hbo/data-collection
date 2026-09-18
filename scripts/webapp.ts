@@ -165,6 +165,11 @@ export function createApp(
       const tpl = RESEARCH_TEMPLATES[String(JSON.parse(String(job.payload)).template)];
       if (tpl) nodeTitles = Object.fromEntries(tpl.nodes.map((n) => [n.id, n.title]));
     } catch { /* 忽略 */ }
+    let skeletonTitles: Record<string, string> = {};
+    try {
+      const tpl = RESEARCH_TEMPLATES[String(JSON.parse(String(job.payload)).template)];
+      if (tpl) for (const n of tpl.nodes) skeletonTitles[n.id] = "";
+    } catch { /* 忽略 */ }
     let nodes: Record<string, { status: string }> = {};
     let progress = { done: 0, total: 0 };
     if (run?.node_state) {
@@ -176,13 +181,17 @@ export function createApp(
                      total: Object.keys(nodes).length };
       } catch { /* 快照损坏时降级为空进度 */ }
     }
+    for (const nid of Object.keys(skeletonTitles)) {
+      if (!nodes[nid]) nodes[nid] = { status: "pending" };
+      progress = { done: Object.values(nodes).filter((n) => n.status === "done").length, total: Object.keys(nodes).length };
+    }
     res.json({ job, run: run ?? null, nodes, nodeTitles, progress, evidence, report: report?.content ?? null, artifactId: report?.id ?? null });
   });
 
   const researchActivate = (id: number, res: import("express").Response) => {
     const job = db.getJob(id);
     if (!job || job.type !== "research") return res.status(404).json({ detail: "研究任务不存在" });
-    db.setJobEnabled(id, true);
+    retryOnBusy(() => db.setJobEnabled(id, true));
     res.json({ ok: true, running: true });
     return undefined;
   };
@@ -196,14 +205,9 @@ export function createApp(
       AND status IN ('SUCCESS','SKIPPED_UNCHANGED','SKIPPED_NO_CONTENT')`);
     const tokens = q(`SELECT COALESCE(SUM(input_tokens+output_tokens),0) AS n FROM crawl_runs
       WHERE substr(created_at,1,10)=date('now') AND status IN ('SUCCESS','SCHEMA_ERROR')`);
-    const rCount = (st: string | null, enabled: number | null) => {
-      let sql = "SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'";
-      const args: unknown[] = [];
-      if (st) { sql += " AND EXISTS (SELECT 1 FROM job_runs r WHERE r.job_id=j.id AND r.status=?) ORDER BY r.id"; args.push(st); }
-      if (enabled !== null) { sql += " AND enabled = ?"; args.push(enabled); }
-      return q(sql, ...args).n;
-    };
-    const pendingConfirm = q("SELECT COUNT(*) AS n FROM jobs WHERE type='research' AND enabled=0").n;
+    // 待确认 = 未启用且从未执行过（排除已删除停用的历史任务）
+    const pendingConfirm = q(`SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research' AND j.enabled=0
+      AND NOT EXISTS (SELECT 1 FROM job_runs r WHERE r.job_id = j.id)`).n;
     const paused = q(`SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'
       AND (SELECT r.status FROM job_runs r WHERE r.job_id=j.id ORDER BY r.id DESC LIMIT 1)='paused'`).n;
     const running = q(`SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'
@@ -214,12 +218,12 @@ export function createApp(
       SELECT s.id, s.name, s.url, COUNT(*) AS fails FROM crawl_runs c
       JOIN sources s ON s.id = c.source_id
       WHERE c.status IN ('FETCH_ERROR','BLOCKED') AND substr(c.created_at,1,10)=date('now')
-      GROUP BY c.source_id HAVING fails >= 3 ORDER BY c.source_id LIMIT 10`).all() as { id: number; name: string | null; url: string }[];
+      GROUP BY c.source_id HAVING fails >= 3 ORDER BY c.source_id LIMIT 10`).all() as { id: number; name: string | null; url: string; fails: number }[];
     const todos: { kind: string; text: string; link: string }[] = [];
     if (pendingConfirm) todos.push({ kind: "research", text: `${pendingConfirm} 个研究待确认`, link: "research" });
     if (paused) todos.push({ kind: "research", text: `${paused} 个研究暂停待续跑`, link: "research" });
     for (const b of badSources) {
-      todos.push({ kind: "source", text: `「${b.name || b.url}」今日失败 ${"?"} 次，疑似页面改版`, link: "sources" });
+      todos.push({ kind: "source", text: `「${b.name || b.url}」今日失败 ${b.fails} 次，疑似页面改版`, link: "sources" });
     }
     res.json({
       metrics: { today_total: today.n, today_ok_rate: today.n ? todayOk.n / today.n : 0, today_tokens: tokens.n },

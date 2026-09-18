@@ -170,3 +170,33 @@ details pre {
   .sidebar { width: 100%; height: auto; position: static; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Phase 10（自 demo 移植：状态机进度条/节点链/场景卡/等级徽标） ── */
+/* 状态机进度条（品牌隐喻位：唯一允许光谱渐变处） */
+.spectrum{height:4px;border-radius:2px;background:linear-gradient(90deg,#ba3030,#d97706,#156f43,#0f766e,#155e75,#6d4fc2);opacity:.85}
+.node-chain{display:flex;align-items:flex-start;gap:0;margin-top:14px;overflow-x:auto;padding-bottom:4px}
+.node{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:88px;flex:1}
+.node .dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:13px;background:var(--surface-3);color:var(--soft);border:2px solid var(--surface-3)}
+.node.done .dot{background:var(--primary);border-color:var(--primary);color:#fff}
+.node.current .dot{background:var(--surface);border-color:var(--primary);color:var(--primary);
+  animation:pulse 1.6s ease-out infinite}
+.node.fail .dot{background:var(--red);border-color:var(--red);color:#fff}
+.node .label{font-size:12px;color:var(--muted);text-align:center}
+.node.current .label{color:var(--primary-ink);font-weight:500}
+.node-link{flex:0 0 26px;height:2px;background:var(--border);margin-top:13px}
+.node-link.done{background:var(--primary)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(21,94,117,.35)}70%{box-shadow:0 0 0 8px rgba(21,94,117,0)}100%{box-shadow:0 0 0 0 rgba(21,94,117,0)}}
+
+/* 场景卡片 */
+.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+.scenario{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-base);padding:16px;cursor:pointer}
+.scenario:hover{border-color:var(--primary)}
+.scenario .icon{font-size:22px}
+.scenario h3{font-size:15px;margin:8px 0 6px}
+.scenario p{font-size:12.5px;color:var(--muted);margin:0 0 10px;min-height:38px}
+.scenario .stat{font-size:12px;color:var(--soft)}
+.scenario .go{color:var(--primary);font-size:12.5px;margin-top:8px;display:inline-block}
+
+.badge-teal{background:var(--teal-soft);color:var(--teal)}
+.badge-brand{background:var(--primary-soft);color:var(--primary-ink)}

@@ -129,12 +129,12 @@ export class WorkflowEngine {
         const gateOutput = gateState?.result?.output ?? "";
         if (node.gate.ran && gateState?.status !== "done") {
           st.status = "skipped";
-          await onNode?.(state, node.id);
+          try { await onNode?.(state, node.id); } catch { /* 忽略 */ }
           continue;
         }
         if (node.gate.contains && !gateOutput.includes(node.gate.contains)) {
           st.status = "skipped"; // 条件未触发（如校验无需补证）
-          await onNode?.(state, node.id);
+          try { await onNode?.(state, node.id); } catch { /* 忽略 */ }
           continue;
         }
       }
@@ -163,7 +163,8 @@ export class WorkflowEngine {
           return { completed: false, paused: true, state, report: null,
                    inputTokens, outputTokens, error: "超出 token 预算" };
         }
-        await onNode?.(state, node.id);
+        try { await onNode?.(state, node.id); } // 快照写失败不得触发昂贵节点重跑
+        catch (e) { console.warn("node snapshot failed:", e); }
         break; // 节点成功：跳出重试循环
       } catch (e) {
         attemptError = e;
