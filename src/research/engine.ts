@@ -112,8 +112,10 @@ export class WorkflowEngine {
     this.nodeRetries = Math.max(1, nodeRetries);
   }
 
-  /** 从快照续跑：pending/skipped 节点重新评估，done 直接跳过。 */
-  async run(state: WorkflowState): Promise<EngineResult> {
+  /** 从快照续跑：pending/skipped 节点重新评估，done 直接跳过。
+   *  onNode：每个节点进入终态（done/skipped）后回调，用于增量持久化快照。 */
+  async run(state: WorkflowState,
+          onNode?: (state: WorkflowState, nodeId: string) => void | Promise<void>): Promise<EngineResult> {
     let inputTokens = 0;
     let outputTokens = 0;
 
@@ -127,10 +129,12 @@ export class WorkflowEngine {
         const gateOutput = gateState?.result?.output ?? "";
         if (node.gate.ran && gateState?.status !== "done") {
           st.status = "skipped";
+          await onNode?.(state, node.id);
           continue;
         }
         if (node.gate.contains && !gateOutput.includes(node.gate.contains)) {
           st.status = "skipped"; // 条件未触发（如校验无需补证）
+          await onNode?.(state, node.id);
           continue;
         }
       }
@@ -159,6 +163,7 @@ export class WorkflowEngine {
           return { completed: false, paused: true, state, report: null,
                    inputTokens, outputTokens, error: "超出 token 预算" };
         }
+        await onNode?.(state, node.id);
         break; // 节点成功：跳出重试循环
       } catch (e) {
         attemptError = e;

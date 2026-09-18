@@ -508,3 +508,84 @@ window.go = function (name) {
   if (name === "sources") { refreshConnectors(); refreshCustomJobs(); }
 };
 
+
+/* ---------- 研究工作台（Phase 10 切片2） ---------- */
+const JOB_BADGE = {
+  success: ["成功", "ok"], running: ["进行中", "warn"], paused: ["待处理", "warn"],
+  failed: ["失败", "err"], skipped: ["跳过", "skip"],
+};
+let researchTimer = null;
+
+async function refreshResearchJobs(openDetail) {
+  try {
+    const jobs = await api("/api/research/jobs");
+    $("#research-table tbody").innerHTML = jobs.map((j) => {
+      const [label, cls] = JOB_BADGE[j.last_status] || [j.last_status || "待执行", "skip"];
+      let prog = "-";
+      if (j.last_state) {
+        try {
+          const nodes = Object.values(JSON.parse(j.last_state).nodes);
+          prog = `${nodes.filter((n) => n.status === "done").length} / ${nodes.length}`;
+        } catch { /* ignore */ }
+      }
+      return `<tr style="cursor:pointer" onclick="openResearch(${j.id})">
+        <td><b>${esc(j.name ?? "")}</b></td>
+        <td><span class="badge badge-${cls}">${esc(label)}</span></td>
+        <td>${prog}</td><td>${(j.input_tokens ?? 0) + (j.output_tokens ?? 0)}</td>
+        <td>${esc(j.last_run_at ?? "")}</td><td class="go">查看 ▸</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="6" class="hint">暂无研究任务——点右上「新建研究」</td></tr>';
+    if (openDetail) openResearch(openDetail);
+  } catch (e) { console.error(e); }
+}
+
+async function openResearch(id) {
+  try {
+    const d = await api(`/api/research/jobs/${id}`);
+    clearInterval(researchTimer);
+    const box = $("#research-detail");
+    box.style.display = "block";
+    const nodes = d.nodes ?? {};
+    const order = Object.keys(nodes);
+    const running = d.run && d.run.status === "running";
+    const firstPending = order.find((k) => nodes[k].status === "pending");
+    const doneCount = order.filter((k) => nodes[k].status === "done").length;
+    const pct = order.length ? Math.round((doneCount / order.length) * 100) : 0;
+    const chain = order.map((k, i) => {
+      const st = nodes[k].status;
+      const cls = st === "done" ? "done" : (running && k === firstPending) ? "current" : st === "failed" ? "fail" : "";
+      const dot = st === "done" ? "✓" : st === "failed" ? "✕" : (running && k === firstPending) ? "●" : String(i + 1);
+      const link = i < order.length - 1 ? `<div class="node-link ${st === "done" ? "done" : ""}"></div>` : "";
+      const title = (d.nodeTitles && d.nodeTitles[k]) || k;
+      return `<div class="node ${cls}"><div class="dot">${dot}</div><div class="label">${esc(title)}</div></div>${link}`;
+    }).join("");
+    box.innerHTML = `
+      <h2 class="card-title">${esc(d.job.name ?? "")} — 执行视图</h2>
+      <div class="spectrum" style="position:relative">
+        <div style="position:absolute;left:0;top:0;height:4px;width:${pct}%;background:var(--primary);border-radius:2px"></div>
+      </div>
+      <div class="node-chain">${chain}</div>
+      ${d.run && d.run.status === "paused" && d.run.error
+        ? `<div class="notice warn">⏸ 暂停：${esc(d.run.error)}
+           <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${id})">▶ 续跑</button></div>` : ""}
+      ${d.job.enabled ? "" : `<div class="notice">ℹ 待确认任务：<button class="btn btn-primary btn-mini" onclick="confirmResearch(${id})">确认并开始</button></div>`}
+      <p class="hint" style="margin-top:8px">状态每 10 秒自动刷新（进行中）</p>`;
+    if (running) researchTimer = setInterval(() => openResearch(id), 10000);
+  } catch (e) { console.error(e); }
+}
+
+async function resumeResearch(id) {
+  try { await api(`/api/research/jobs/${id}/resume`, { method: "POST" }); refreshResearchJobs(id); }
+  catch (e) { alert(`续跑失败：${e.message}`); }
+}
+async function confirmResearch(id) {
+  try { await api(`/api/research/jobs/${id}/confirm`, { method: "POST" }); refreshResearchJobs(id); }
+  catch (e) { alert(`确认失败：${e.message}`); }
+}
+function toggleNewResearch() { /* 切片4 实现发起表单 */ }
+
+const _goPrev = window.go;
+window.go = function (name) {
+  _goPrev(name);
+  if (name === "research") refreshResearchJobs();
+};

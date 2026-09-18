@@ -79,7 +79,14 @@ export class ResearchExecutor implements JobExecutor {
 
     const engine = new WorkflowEngine(template, this.makeRunner(), payload.topic,
                                       payload.maxInputTokens ?? 400_000);
-    const result = await engine.run(state);
+    // 增量快照：每节点完成即持久化到当前 running 行（崩溃/长任务可观测）
+    const result = await engine.run(state, async (snap, nodeId) => {
+      void nodeId;
+      if (ctx.jobRunId != null) {
+        ctx.db.conn.prepare("UPDATE job_runs SET node_state = ? WHERE id = ?")
+          .run(JSON.stringify(snap), ctx.jobRunId);
+      }
+    });
     const nodeState = JSON.stringify(result.state);
 
     if (result.completed && result.report) {

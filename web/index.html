@@ -16,6 +16,7 @@
     <div class="nav-group">
       <div class="nav-group-title">工作台</div>
       <button class="nav-item active" data-page="chat">💬 对话助手</button>
+      <button class="nav-item" data-page="research">🔬 研究工作台</button>
       <button class="nav-item" data-page="run">▶ 采集执行</button>
       <button class="nav-item" data-page="runs">📋 运行记录</button>
     </div>
@@ -50,6 +51,27 @@
         </form>
       </div>
       <p class="page-foot">助手只负责整理采集计划，不会自动执行；一切执行都需你点击确认。</p>
+    </section>
+
+    <!-- 研究工作台（Phase 10） -->
+    <section class="page" id="page-research">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">研究工作台</h1>
+          <p class="page-desc">多步研究：检索采证 → 整合写作 → 质量校验 → 条件补证。确认后才消耗 tokens，失败可断点续跑。</p>
+        </div>
+        <button class="btn btn-primary" onclick="toggleNewResearch()">＋ 新建研究</button>
+      </div>
+      <div class="card" id="new-research" style="display:none"></div>
+      <div class="card">
+        <h2 class="card-title">研究任务 <button class="btn btn-secondary btn-mini" onclick="refreshResearchJobs()">刷新</button></h2>
+        <table class="table" id="research-table">
+          <thead><tr><th>任务</th><th>状态</th><th>进度</th><th>tokens</th><th>更新时间</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card" id="research-detail" style="display:none"></div>
+      <p class="page-foot">报告与证据经质量终检后才会发布；暂停态附原因，工具就绪后可续跑。</p>
     </section>
 
     <!-- 采集执行 -->

@@ -18,7 +18,7 @@ import { listTemplates, RESEARCH_TEMPLATES } from "../src/research/templates/ind
 
 import { planWithUser } from "../src/planner.ts";
 import { TransientProviderError } from "../src/providers/base.ts";
-import { Database } from "../src/storage/db.ts";
+import { Database, retryOnBusy } from "../src/storage/db.ts";
 import * as queries from "../src/storage/queries.ts";
 import { fetchRows, toCsv, toJson, toMarkdown } from "./export-data.ts";
 import {
@@ -98,7 +98,7 @@ export function createApp(
   app.post("/api/sources", (req, res) => {
     try {
       const body = req.body ?? {};
-      const id = db.upsertSource({
+      const id = retryOnBusy(() => db.upsertSource({
         url: body.url,
         schemaType: body.schema_type,
         name: body.name ?? null,
@@ -106,7 +106,7 @@ export function createApp(
         enabled: body.enabled ?? true,
         useBrowser: Boolean(body.use_browser),
         instruction: body.instruction ?? "",
-      });
+      }));
       res.json({ ok: true, id });
     } catch (e) {
       res.status(400).json({ detail: e instanceof Error ? e.message : String(e) });
@@ -123,13 +123,13 @@ export function createApp(
     }
     const topic = String(body.topic ?? "").trim();
     if (topic.length < 2) return res.status(400).json({ detail: "研究对象过短" });
-    const jobId = db.insertJob({
+    const jobId = retryOnBusy(() => db.insertJob({
       type: "research", name: `${RESEARCH_TEMPLATES[String(body.template)].name}：${topic}`,
       payload: JSON.stringify({ template: body.template, topic,
                                 maxInputTokens: body.max_input_tokens ?? undefined }),
       schedule: JSON.stringify({ kind: "interval", interval_s: 86400 }),
       enabled: false, // 计划确认前不进调度（执行确认边界）
-    });
+    }));
     res.json({ ok: true, id: jobId, status: "pending_confirmation" });
   });
 
@@ -152,7 +152,23 @@ export function createApp(
       `SELECT a.content FROM artifacts a JOIN job_runs r ON a.job_run_id = r.id
        WHERE r.job_id = ? AND a.kind = 'report' ORDER BY a.id DESC LIMIT 1`)
       .get(Number(job.id)) as { content: string } | undefined;
-    res.json({ job, run: run ?? null, report: report?.content ?? null });
+    let nodeTitles: Record<string, string> = {};
+    try {
+      const tpl = RESEARCH_TEMPLATES[String(JSON.parse(String(job.payload)).template)];
+      if (tpl) nodeTitles = Object.fromEntries(tpl.nodes.map((n) => [n.id, n.title]));
+    } catch { /* 忽略 */ }
+    let nodes: Record<string, { status: string }> = {};
+    let progress = { done: 0, total: 0 };
+    if (run?.node_state) {
+      try {
+        nodes = Object.fromEntries(Object.entries(
+          (JSON.parse(String(run.node_state)) as { nodes: Record<string, { status: string }> }).nodes)
+          .map(([k, v]) => [k, { status: v.status }]));
+        progress = { done: Object.values(nodes).filter((n) => n.status === "done").length,
+                     total: Object.keys(nodes).length };
+      } catch { /* 快照损坏时降级为空进度 */ }
+    }
+    res.json({ job, run: run ?? null, nodes, nodeTitles, progress, report: report?.content ?? null });
   });
 
   const researchActivate = (id: number, res: import("express").Response) => {
@@ -192,11 +208,11 @@ export function createApp(
     if (intervalS < connector.minIntervalS) {
       return res.status(400).json({ detail: `${connector.name} 最小间隔 ${connector.minIntervalS}s` });
     }
-    const jobId = db.insertJob({
+    const jobId = retryOnBusy(() => db.insertJob({
       type: "custom", name: body.name ?? connector.name,
       payload: JSON.stringify({ connector: connector.id, params: body.params ?? {}, _wm: null }),
       schedule: JSON.stringify({ kind: "interval", interval_s: intervalS }),
-    });
+    }));
     res.json({ ok: true, id: jobId });
   });
 
@@ -229,13 +245,13 @@ export function createApp(
 
   app.delete("/api/jobs/:id", (req, res) => {
     if (!db.getJob(Number(req.params.id))) return res.status(404).json({ detail: "任务不存在" });
-    db.setJobEnabled(Number(req.params.id), false);
+    retryOnBusy(() => db.setJobEnabled(Number(req.params.id), false));
     res.json({ ok: true });
   });
 
   app.delete("/api/sources/:id", (req, res) => {
     try {
-      const deleted = db.deleteSource(Number(req.params.id));
+      const deleted = retryOnBusy(() => db.deleteSource(Number(req.params.id)));
       if (!deleted) return res.status(404).json({ detail: "来源不存在" });
       res.json({ ok: true });
     } catch {

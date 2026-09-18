@@ -113,6 +113,19 @@ const MIGRATIONS: Record<number, string[]> = {
   ],
 };
 
+/** SQLITE_BUSY / database is locked → 单发重试一次（并发窗口通常毫秒级）。 */
+export function retryOnBusy<T>(fn: () => T, attempts = 2): T {
+  for (let i = 1; ; i++) {
+    try {
+      return fn();
+    } catch (e) {
+      const msg = `${(e as { code?: string })?.code ?? ""} ${e}`;
+      if (i < attempts && /SQLITE_BUSY|database is locked/i.test(msg)) continue;
+      throw e;
+    }
+  }
+}
+
 export interface SourceInput {
   url: string;
   schemaType: string;
@@ -141,6 +154,8 @@ export class Database {
     this.conn = new DatabaseSync(path);
     this.conn.exec("PRAGMA foreign_keys = ON");
     this.conn.exec("PRAGMA journal_mode = WAL"); // 面板只读连接与采集写并发
+    this.conn.exec("PRAGMA busy_timeout = 5000"); // 双进程写（webapp 命令 × daemon 台账）
+
     this.initSchema();
   }
 
