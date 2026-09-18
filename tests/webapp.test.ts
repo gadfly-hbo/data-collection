@@ -345,3 +345,26 @@ describe("webapp：报告导出与证据透出", () => {
     db.close();
   });
 });
+
+describe("webapp：总览聚合", () => {
+  it("GET /api/overview 指标 + 待办", async () => {
+    const db = new Database(":memory:");
+    db.upsertSource({ url: "https://s.example", schemaType: "NewsItem", name: "S" });
+    for (let i = 0; i < 3; i++) db.insertRun({ url: "https://s.example", status: "FETCH_ERROR", sourceId: 1 });
+    db.insertRun({ url: "https://ad.example", status: "SUCCESS" }); // adhoc（无 source）
+    db.insertJob({ type: "research", name: "r1", enabled: false });             // 待确认
+    const j2 = db.insertJob({ type: "research", name: "r2", enabled: true });
+    db.insertJobRun({ jobId: j2, status: "paused" });
+    const j3 = db.insertJob({ type: "custom", name: "天气", enabled: true });
+    void j3;
+    await withApp(db, {}, async (base) => {
+      const o = await (await fetch(`${base}/api/overview`)).json();
+      expect(o.scenarios.research.pendingConfirm).toBe(1);
+      expect(o.scenarios.research.paused).toBe(1);
+      expect(o.scenarios.adhoc.today).toBe(1);
+      expect(o.scenarios.custom.active).toBe(1);
+      expect(o.todos.length).toBeGreaterThanOrEqual(3); // 待确认+暂停+坏源
+    });
+    db.close();
+  });
+});

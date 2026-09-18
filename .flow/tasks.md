@@ -17,17 +17,17 @@
   - **覆盖故事**: 6,7,9(报告),15
   - executor 完成后从 research/fix 输出行式解析证据数组（编号/等级/URL/内容）写入 artifacts.meta；`GET /api/export/report/:artifactId` .md 下载；详情端点带 evidence；UI 报告页：证据表（等级徽标+可点来源）+ 缺口提示（末段）+ 报告正文；无 evidence 时降级纯 Markdown。测试：解析器夹具（job#4 风格文本）、端点、导出头。
 
-- [ ] 4. 发起与确认闭环（表单 + chat intent 衔接）
+- [x] 4. 发起与确认闭环（表单 + chat intent 衔接）
   - **Blocked by**: 2
   - **覆盖故事**: 2(发起),3,10
   - 工作台「新建研究」（模板下拉=templates 端点、对象、深度→maxInputTokens 三档、预算提示）→ 创建 pending → 计划卡确认态文案 → confirm；planner PlanReply 增可选 `intent:"research"` + 系统提示词；chat 前端见 intent 渲染草稿卡→一键建任务。测试：chat 透传、创建→确认→enabled、intent 兜底（缺字段旧行为）。
 
-- [ ] 5. 总览页（聚合+待办直达）
+- [x] 5. 总览页（聚合+待办直达）
   - **Blocked by**: 2,4（jobs by type 需 research 计数语义稳定）
   - **覆盖故事**: 1,11
   - 新端点 `GET /api/overview`：today 指标、三场景计数（research paused→待补证、connector failed 连续≥3→失败源、今日 adhoc 计数）；前端总览页 + 待办 notice 直达路由。测试：种子数据断言各计数。
 
-- [ ] 6. dataset CSV 导出收尾
+- [x] 6. dataset CSV 导出收尾
   - **Blocked by**: 1
   - **覆盖故事**: 9(数据)
   - `GET /api/export/dataset/:jobId`（最新+累计行 → 现有 toCsv 形状）；数据源页 dataset 预览区加下载按钮。测试：端点导出与库内行数一致。

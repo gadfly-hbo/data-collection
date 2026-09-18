@@ -189,6 +189,68 @@ export function createApp(
   app.post("/api/research/jobs/:id/confirm", (req, res) => researchActivate(Number(req.params.id), res));
   app.post("/api/research/jobs/:id/resume", (req, res) => researchActivate(Number(req.params.id), res));
 
+  app.get("/api/overview", (_req, res) => {
+    const q = (sql: string, ...args: unknown[]) => db.conn.prepare(sql).get(...args as never[]) as Record<string, number>;
+    const today = q(`SELECT COUNT(*) AS n FROM crawl_runs WHERE substr(created_at,1,10)=date('now')`);
+    const todayOk = q(`SELECT COUNT(*) AS n FROM crawl_runs WHERE substr(created_at,1,10)=date('now')
+      AND status IN ('SUCCESS','SKIPPED_UNCHANGED','SKIPPED_NO_CONTENT')`);
+    const tokens = q(`SELECT COALESCE(SUM(input_tokens+output_tokens),0) AS n FROM crawl_runs
+      WHERE substr(created_at,1,10)=date('now') AND status IN ('SUCCESS','SCHEMA_ERROR')`);
+    const rCount = (st: string | null, enabled: number | null) => {
+      let sql = "SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'";
+      const args: unknown[] = [];
+      if (st) { sql += " AND EXISTS (SELECT 1 FROM job_runs r WHERE r.job_id=j.id AND r.status=?) ORDER BY r.id"; args.push(st); }
+      if (enabled !== null) { sql += " AND enabled = ?"; args.push(enabled); }
+      return q(sql, ...args).n;
+    };
+    const pendingConfirm = q("SELECT COUNT(*) AS n FROM jobs WHERE type='research' AND enabled=0").n;
+    const paused = q(`SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'
+      AND (SELECT r.status FROM job_runs r WHERE r.job_id=j.id ORDER BY r.id DESC LIMIT 1)='paused'`).n;
+    const running = q(`SELECT COUNT(*) AS n FROM jobs j WHERE j.type='research'
+      AND (SELECT r.status FROM job_runs r WHERE r.job_id=j.id ORDER BY r.id DESC LIMIT 1)='running'`).n;
+    const adhoc = q(`SELECT COUNT(*) AS n FROM crawl_runs WHERE source_id IS NULL
+      AND substr(created_at,1,10)=date('now')`).n;
+    const badSources = db.conn.prepare(`
+      SELECT s.id, s.name, s.url, COUNT(*) AS fails FROM crawl_runs c
+      JOIN sources s ON s.id = c.source_id
+      WHERE c.status IN ('FETCH_ERROR','BLOCKED') AND substr(c.created_at,1,10)=date('now')
+      GROUP BY c.source_id HAVING fails >= 3 ORDER BY c.source_id LIMIT 10`).all() as { id: number; name: string | null; url: string }[];
+    const todos: { kind: string; text: string; link: string }[] = [];
+    if (pendingConfirm) todos.push({ kind: "research", text: `${pendingConfirm} 个研究待确认`, link: "research" });
+    if (paused) todos.push({ kind: "research", text: `${paused} 个研究暂停待续跑`, link: "research" });
+    for (const b of badSources) {
+      todos.push({ kind: "source", text: `「${b.name || b.url}」今日失败 ${"?"} 次，疑似页面改版`, link: "sources" });
+    }
+    res.json({
+      metrics: { today_total: today.n, today_ok_rate: today.n ? todayOk.n / today.n : 0, today_tokens: tokens.n },
+      scenarios: {
+        research: { pendingConfirm, paused, running },
+        custom: { active: q("SELECT COUNT(*) AS n FROM jobs WHERE type='custom' AND enabled=1").n },
+        adhoc: { today: adhoc },
+      },
+      todos,
+    });
+  });
+
+  app.get("/api/export/dataset/:jobId", (req, res) => {
+    const job = db.getJob(Number(req.params.jobId));
+    if (!job) return res.status(404).json({ detail: "任务不存在" });
+    const arts = db.conn.prepare(
+      `SELECT a.content FROM artifacts a JOIN job_runs r ON a.job_run_id = r.id
+       WHERE r.job_id = ? AND a.kind='dataset' ORDER BY a.id`).all(Number(job.id)) as { content: string }[];
+    const rows = arts.flatMap((a) => { try { return JSON.parse(a.content) as { ts: string; values: Record<string, unknown> }[]; } catch { return []; } });
+    const keys = [...new Set(rows.flatMap((r) => Object.keys(r.values ?? {})))];
+    const escCell = (v: unknown) => {
+      const x = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
+    };
+    const lines = ["ts," + keys.join(","),
+      ...rows.map((r) => [r.ts, ...keys.map((k) => escCell(r.values?.[k]))].join(","))];
+    res.setHeader("Content-Disposition", 'attachment; filename="dataset.csv"');
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.send("﻿" + lines.join("\n") + "\n");
+  });
+
   app.get("/api/connectors", (_req, res) => {
     res.json(Object.values(CONNECTOR_REGISTRY).map((c) => {
       const shape = (c.params as unknown as { _def?: { shape?: () => Record<string, { description?: string; options?: { values?: unknown[] } }> } })._def?.shape?.() ?? {};
