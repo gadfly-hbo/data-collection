@@ -27,7 +27,7 @@ export const districtTemplate: ResearchTemplate = {
     {
       id: "write",
       title: "报告写作",
-      requireSearch: true,
+      requireSearch: false,
       prompt: "基于以下证据材料为「{{task}}」撰写商圈研究报告（Markdown）：\n\n{{outputs.research}}\n\n# 结构\n1. 结论先行（核心判断 ≤5 条）\n2. 区位与客群（引用 A 分支证据编号）\n3. 商业生态与竞品（引用 B 分支证据编号）\n4. 风险与数据缺口\n5. 附录：证据清单（保留等级与来源 URL）\n\n规则：每个事实必须挂证据编号；推断单独标注；禁止引入证据材料之外的“记忆事实”。",
     },
     {

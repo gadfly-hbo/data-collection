@@ -10,7 +10,7 @@ function skeleton(id: string, name: string, description: string, dims: string): 
         prompt: `为研究对象「{{task}}」制定检索策略：列出 6~10 条查询词，覆盖维度：${dims}。只输出计划清单。` },
       { id: "research", title: "网络采证", requireSearch: true,
         prompt: `研究对象：{{task}}。\n\n# 检索计划\n{{outputs.plan}}\n\n按计划执行真实检索采证。证据等级：A=官方/一手，B=行业/二次整理，C=社媒待验证。输出格式：\`[编号] 【来源/日期】【等级】 内容。来源：URL\`，≥6 条 A/B 级，推断单独标注「推断：（置信度）」，末尾列 2~3 条数据缺口。` },
-      { id: "write", title: "报告写作", requireSearch: true,
+      { id: "write", title: "报告写作", requireSearch: false,
         prompt: `基于证据材料为「{{task}}」撰写报告（Markdown）：\n\n{{outputs.research}}\n\n结构：结论先行 → ${dims} 分节论述（挂证据编号）→ 风险与缺口 → 证据附录。禁止引入证据外“记忆事实”。` },
       { id: "validate", title: "质量校验", requireSearch: false,
         prompt: `审查报告：①关键事实均有证据与 URL ②A/B 级 ≥6 条 ③缺口显式。达标只输出 PASS，否则输出 NEED_FIX 并列补证清单（含建议检索词）。\n\n{{outputs.write}}`,
