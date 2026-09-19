@@ -10,26 +10,26 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <div class="mark">P</div>
+      <div class="mark">采</div>
       <div><strong>棱镜采集</strong><small>研究 · 数据源 · 临时采集</small></div>
     </div>
     <div class="nav-group">
-      <button class="nav-item active" data-page="overview">🏠 总览</button>
-      <button class="nav-item" data-page="chat">💬 对话助手</button>
+      <button class="nav-item active" data-page="overview"><span class="num">01</span>总览</button>
+      <button class="nav-item" data-page="chat"><span class="num">02</span>对话助手</button>
     </div>
     <div class="nav-group">
       <div class="nav-group-title">采集任务</div>
-      <button class="nav-item" data-page="research">🔬 深度研究</button>
-      <button class="nav-item" data-page="sources">📡 数据源</button>
-      <button class="nav-item" data-page="run">▶️ 临时采集</button>
+      <button class="nav-item" data-page="research"><span class="num">03</span>深度研究</button>
+      <button class="nav-item" data-page="sources"><span class="num">04</span>数据源</button>
+      <button class="nav-item" data-page="run"><span class="num">05</span>临时采集</button>
     </div>
     <div class="nav-group">
       <div class="nav-group-title">成果</div>
-      <button class="nav-item" data-page="data">🔎 数据与报告</button>
+      <button class="nav-item" data-page="data"><span class="num">06</span>数据与报告</button>
     </div>
     <div class="nav-group">
       <div class="nav-group-title">运维</div>
-      <button class="nav-item" data-page="runs">📋 运行记录</button>
+      <button class="nav-item" data-page="runs"><span class="num">07</span>运行记录</button>
     </div>
     <div class="side-note">
       <strong>边界承诺</strong>
@@ -57,17 +57,17 @@
       <div class="metrics" id="ov-metrics"></div>
       <div class="scenario-grid">
         <div class="scenario" onclick="go('research')">
-          <div class="icon">🔬</div><h3>深度研究</h3>
+          <div class="chip">01</div><h3>深度研究</h3>
           <p>多步工作流：检索采证 → 整合写作 → 质量校验，支持失败续跑与补证。商圈 / 品牌 / 企业。</p>
           <div class="stat" id="sc-research">—</div><span class="go">进入工作台 →</span>
         </div>
         <div class="scenario" onclick="go('sources')">
-          <div class="icon">📡</div><h3>定制数据源</h3>
+          <div class="chip">02</div><h3>定制数据源</h3>
           <p>天气、统计局等结构化数据的定时采集：确定性抓取，零 token 成本。</p>
           <div class="stat" id="sc-custom">—</div><span class="go">管理数据源 →</span>
         </div>
         <div class="scenario" onclick="go('chat')">
-          <div class="icon">💬</div><h3>临时采集</h3>
+          <div class="chip">03</div><h3>临时采集</h3>
           <p>对话式描述需求，助手整理成计划，确认后才执行；即采即得。</p>
           <div class="stat" id="sc-adhoc">—</div><span class="go">去对话 →</span>
         </div>
@@ -83,7 +83,7 @@
           <p class="page-desc">用自然语言描述想采集的内容——助手整理成采集计划，经你确认后才会创建并执行。</p>
         </div>
       </div>
-      <div class="notice">💡 示例：「帮我每天早上盯一下 HackerNews 首页的技术热点」·「采集 https://… 这篇文章的关键信息」</div>
+      <div class="notice">示例：「帮我每天早上盯一下 HackerNews 首页的技术热点」·「采集 https://… 这篇文章的关键信息」</div>
       <div class="card chat">
         <div class="chat-log" id="chat-log">
           <div class="msg assistant">你好，我是采集助手。告诉我你想<b>采集什么内容、从哪个页面采集、多久采集一次</b>，我会整理成计划给你确认。</div>
@@ -138,7 +138,7 @@
           <div class="field">
             <label class="chk"><input id="run-browser" type="checkbox"> 浏览器渲染（JS 站点）</label>
           </div>
-          <button type="submit" class="btn btn-primary" id="run-btn">▶ 执行采集</button>
+          <button type="submit" class="btn btn-primary" id="run-btn">执行采集</button>
         </form>
       </div>
       <div id="run-result" class="card" style="display:none"></div>
@@ -184,7 +184,7 @@
             <label for="discover-topic">主题</label>
             <input id="discover-topic" type="text" placeholder="如：AI 监管政策动态">
           </div>
-          <button class="btn btn-primary" id="discover-btn">🔍 发现来源</button>
+          <button class="btn btn-primary" id="discover-btn">发现来源</button>
         </div>
         <div id="discover-results"></div>
       </div>

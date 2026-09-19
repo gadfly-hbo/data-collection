@@ -99,7 +99,7 @@ function planCardHtml(plan) {
         ${plan.use_browser ? `<dt>渲染方式</dt><dd>浏览器渲染（JS 站点）</dd>` : ""}
       </dl>
       <div class="plan-actions">
-        <button class="btn btn-primary btn-mini" data-act="confirm-run">✅ 确认创建并立即执行</button>
+        <button class="btn btn-primary btn-mini" data-act="confirm-run">确认并执行</button>
         <button class="btn btn-secondary btn-mini" data-act="confirm-only">仅创建来源</button>
         <button class="btn btn-mini" data-act="revise">再修改一下</button>
       </div>
@@ -156,7 +156,7 @@ $("#chat-log").addEventListener("click", async (event) => {
   try {
     const r = await api("/api/research", { method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ template: draft.template, topic: draft.topic, max_input_tokens: 250000 }) });
-    btn.closest(".plan-actions").innerHTML = `<span class="hint">✅ 已创建 #${r.id} —— </span><button class="btn btn-secondary btn-mini" onclick="go(\x27research\x27)">去研究工作台确认 ▸</button>`;
+    btn.closest(".plan-actions").innerHTML = `<span class="hint">已创建 #${r.id} —— </span><button class="btn btn-secondary btn-mini" onclick="go(\x27research\x27)">去研究工作台确认 ▸</button>`;
     refreshOverview && refreshOverview();
   } catch (e) { alert(`创建失败：${e.message}`); }
 });
@@ -192,7 +192,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
           <dl><dt>研究对象</dt><dd>${esc(data.research.topic)}</dd>
               <dt>执行方式</dt><dd>确认后进入研究工作台多节点执行，token 预算 25 万（标准档）</dd></dl>
           <div class="plan-actions">
-            <button class="btn btn-primary btn-mini" data-research='${esc(JSON.stringify(data.research))}'>➕ 创建并去确认</button>
+            <button class="btn btn-primary btn-mini" data-research='${esc(JSON.stringify(data.research))}'>创建并去确认</button>
           </div>
         </div>`);
     }
@@ -236,7 +236,7 @@ $("#run-form").addEventListener("submit", async (event) => {
     box.style.display = "block";
     box.innerHTML = `<p class="hint">执行失败：${esc(e.message)}</p>`;
   } finally {
-    btn.disabled = false; btn.textContent = "▶ 执行采集";
+    btn.disabled = false; btn.textContent = "执行采集";
   }
 });
 
@@ -251,7 +251,7 @@ async function refreshSources() {
         <td>${s.enabled ? "启用" : "停用"}</td>
         <td>${s.last_status ? badge(s.last_status) : "—"}</td>
         <td>
-          <button class="btn btn-secondary btn-mini" data-act="run" data-id="${s.id}">▶ 采集</button>
+          <button class="btn btn-secondary btn-mini" data-act="run" data-id="${s.id}">采集</button>
           <button class="btn btn-secondary btn-mini" data-act="toggle" data-id="${s.id}">${s.enabled ? "停用" : "启用"}</button>
           <button class="btn btn-danger btn-mini" data-act="delete" data-id="${s.id}">删除</button>
         </td>
@@ -339,13 +339,13 @@ $("#discover-btn").addEventListener("click", async () => {
           <dt>理由</dt><dd>${esc(c.reason)}</dd>
         </dl>
         <div class="plan-actions">
-          <button class="btn btn-primary btn-mini" data-act="add">➕ 添加为来源（每天采集）</button>
+          <button class="btn btn-primary btn-mini" data-act="add">添加为来源（每天采集）</button>
         </div>
       </div>`).join("");
   } catch (e) {
     box.innerHTML = `<p class="hint">发现失败：${esc(e.message)}</p>`;
   } finally {
-    btn.disabled = false; btn.textContent = "🔍 发现来源";
+    btn.disabled = false; btn.textContent = "发现来源";
   }
 });
 
@@ -361,7 +361,7 @@ $("#discover-results").addEventListener("click", async (event) => {
       body: JSON.stringify({url: c.url, name: c.name, schema_type: c.schema_type,
                             interval_s: 86400, enabled: true}),
     });
-    card.querySelector(".plan-actions").innerHTML = '<span class="hint">✅ 已添加（每天 86400s），可在下表调整</span>';
+    card.querySelector(".plan-actions").innerHTML = '<span class="hint">已添加（每天 86400s），可在下表调整</span>';
     refreshSources();
   } catch (e) { alert(`添加失败：${e.message}`); }
   void idx;
@@ -567,8 +567,8 @@ async function openResearch(id) {
       </div>
       <div class="node-chain">${chain}</div>
       ${d.run && d.run.status === "paused" && d.run.error
-        ? `<div class="notice warn">⏸ 暂停：${esc(d.run.error)}
-           <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${id})">▶ 续跑</button></div>` : ""}
+        ? `<div class="notice warn">暂停：${esc(d.run.error)}
+           <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${id})">续跑</button></div>` : ""}
       ${d.job.enabled ? "" : `<div class="notice">ℹ 待确认任务：<button class="btn btn-secondary btn-mini" onclick="confirmResearch(${id})">确认并开始</button></div>`}
       ${renderReport(d)}
       <p class="hint" style="margin-top:8px">状态每 10 秒自动刷新（进行中）</p>`;
@@ -631,13 +631,13 @@ function renderReport(d) {
        </tbody></table>`
     : '<p class="hint" style="margin-top:10px">未解析到结构化证据（旧报告），以下为原文：</p>';
   return `
-    ${gaps ? `<div class="notice warn">⚠ 数据缺口：${esc(gaps.replace(/数据缺口[:：]?\s*/, "").trim().slice(0, 160))}
-      <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${d.job.id})">▶ 续跑补证</button></div>` : ""}
+    ${gaps ? `<div class="notice warn">数据缺口：${esc(gaps.replace(/数据缺口[:：]?\s*/, "").trim().slice(0, 160))}
+      <button class="btn btn-secondary btn-mini" style="margin-left:auto" onclick="resumeResearch(${d.job.id})">续跑补证</button></div>` : ""}
     ${table}
     <details${d.evidence && d.evidence.length ? "" : " open"}><summary>报告全文（Markdown）</summary>
       <pre style="white-space:pre-wrap">${esc(d.report.slice(0, 8000))}</pre></details>
     ${d.artifactId ? `<button class="btn btn-secondary btn-mini" style="margin-top:8px"
-      onclick="location.href='/api/export/report/${d.artifactId}'">⬇ 导出报告 .md</button>` : ""}`;
+      onclick="location.href='/api/export/report/${d.artifactId}'">导出报告 · MD</button>` : ""}`;
 }
 
 
@@ -653,7 +653,7 @@ async function refreshOverview() {
     $("#sc-custom").textContent = `活跃任务 ${o.scenarios.custom.active}`;
     $("#sc-adhoc").textContent = `今日采集 ${o.scenarios.adhoc.today} 次`;
     $("#ov-todos").innerHTML = o.todos.length
-      ? `<div class="notice warn">⚠ 待办：${o.todos.map((t) =>
+      ? `<div class="notice warn">待办：${o.todos.map((t) =>
           `<a href="javascript:void(0)" onclick="go('${t.link}')" style="margin-right:10px">${esc(t.text)} →</a>`).join("")}</div>` : "";
   } catch (e) { console.error(e); }
 }
