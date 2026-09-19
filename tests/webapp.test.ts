@@ -65,7 +65,7 @@ describe("webapp：Web 控制台 API", () => {
       expect(html).toContain("棱镜采集工作台");
       expect(html).toContain("对话助手");
             // HTML 实际引用的是 /static/* —— 必须验这条（曾因只测根路径漏掉挂载 bug）
-      expect((await fetch(`${base}/static/app.js`)).status).toBe(200);
+      expect((await fetch(`${base}/static/js/core.js`)).status).toBe(200);
       const css = await (await fetch(`${base}/static/style.css`)).text();
       expect(css).toContain(".node-chain");
     });
