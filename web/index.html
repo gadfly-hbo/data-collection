@@ -14,18 +14,22 @@
       <div><strong>棱镜采集</strong><small>研究 · 数据源 · 临时采集</small></div>
     </div>
     <div class="nav-group">
-      <div class="nav-group-title">工作台</div>
       <button class="nav-item active" data-page="overview">🏠 总览</button>
-      <button class="nav-item" data-page="chat">💬 对话助手</button>
-      <button class="nav-item" data-page="research">🔬 研究工作台</button>
-      <button class="nav-item" data-page="run">▶ 采集执行</button>
-      <button class="nav-item" data-page="runs">📋 运行记录</button>
     </div>
     <div class="nav-group">
-      <div class="nav-group-title">数据与运维</div>
-      <button class="nav-item" data-page="sources">🧭 来源管理</button>
-      <button class="nav-item" data-page="data">🔎 数据浏览</button>
-      <button class="nav-item" data-page="export">⬇️ 导出</button>
+      <div class="nav-group-title">采集任务</div>
+      <button class="nav-item" data-page="chat">💬 对话助手</button>
+      <button class="nav-item" data-page="research">🔬 深度研究</button>
+      <button class="nav-item" data-page="sources">📡 数据源</button>
+      <button class="nav-item" data-page="run">▶️ 临时采集</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">成果</div>
+      <button class="nav-item" data-page="data">🔎 数据与报告</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">运维</div>
+      <button class="nav-item" data-page="runs">📋 运行记录</button>
     </div>
     <div class="side-note">
       <strong>边界承诺</strong>
@@ -89,7 +93,7 @@
     <section class="page" id="page-research">
       <div class="page-head">
         <div>
-          <h1 class="page-title">研究工作台</h1>
+          <h1 class="page-title">深度研究</h1>
           <p class="page-desc">多步研究：检索采证 → 整合写作 → 质量校验 → 条件补证。确认后才消耗 tokens，失败可断点续跑。</p>
         </div>
         <button class="btn btn-primary" onclick="toggleNewResearch()">＋ 新建研究</button>
@@ -110,7 +114,7 @@
     <section class="page" id="page-run">
       <div class="page-head">
         <div>
-          <h1 class="page-title">采集执行</h1>
+          <h1 class="page-title">临时采集</h1>
           <p class="page-desc">已知网址时直接执行单次采集；不确定网址怎么配置？去「对话助手」让助手帮你整理。</p>
         </div>
       </div>
@@ -138,7 +142,7 @@
     <section class="page" id="page-sources">
       <div class="page-head">
         <div>
-          <h1 class="page-title">来源管理</h1>
+          <h1 class="page-title">数据源</h1>
           <p class="page-desc">采集来源的增删改与启停；变更在下一个调度周期（30 秒内）自动生效。</p>
         </div>
       </div>
@@ -233,8 +237,8 @@
     <section class="page" id="page-data">
       <div class="page-head">
         <div>
-          <h1 class="page-title">数据浏览</h1>
-          <p class="page-desc">查看已入库的结构化数据，支持按类型和关键词过滤。</p>
+          <h1 class="page-title">数据与报告</h1>
+          <p class="page-desc">查看已入库的结构化数据与研究报告，支持过滤；按需导出为 CSV / JSON / Markdown / 报告 .md。</p>
         </div>
       </div>
       <div class="card">
@@ -252,37 +256,21 @@
         <p class="hint" id="data-total"></p>
         <div id="data-list"></div>
       </div>
-    </section>
-
-    <!-- 导出 -->
-    <section class="page" id="page-export">
-      <div class="page-head">
-        <div>
-          <h1 class="page-title">导出</h1>
-          <p class="page-desc">按类型与日期过滤后下载结构化数据。</p>
-        </div>
-      </div>
       <div class="card">
+        <h2 class="card-title">导出当前筛选结果</h2>
         <div class="form-row" id="export-form">
-          <div class="field">
-            <label for="export-schema">数据类型</label>
-            <select id="export-schema"></select>
-          </div>
-          <div class="field">
-            <label for="export-since">起始日期</label>
-            <input id="export-since" type="date">
-          </div>
-          <div class="field">
-            <label for="export-until">结束日期</label>
-            <input id="export-until" type="date">
-          </div>
-          <button class="btn btn-secondary" data-fmt="csv">下载 CSV</button>
-          <button class="btn btn-secondary" data-fmt="json">下载 JSON</button>
-          <button class="btn btn-secondary" data-fmt="markdown">下载 Markdown</button>
+          <div class="field"><label for="export-schema">数据类型</label><select id="export-schema"></select></div>
+          <div class="field"><label for="export-since">起始日期</label><input id="export-since" type="date"></div>
+          <div class="field"><label for="export-until">结束日期</label><input id="export-until" type="date"></div>
+          <button class="btn btn-secondary" data-fmt="csv">CSV</button>
+          <button class="btn btn-secondary" data-fmt="json">JSON</button>
+          <button class="btn btn-secondary" data-fmt="markdown">Markdown</button>
         </div>
       </div>
       <p class="page-foot">数据仅用于运营目的；导出文件请妥善保管。</p>
     </section>
+
+    <!-- 导出 -->
   </main>
 </div>
 <script src="/static/app.js"></script>
