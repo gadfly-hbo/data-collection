@@ -15,8 +15,9 @@ htmlcov/
 # 密钥（只提交 .env.example）
 .env
 
-# 运行时产物（快照与本地数据库）
+# 运行时产物（快照、本地数据库、agent 会话落盘的草稿报告）
 data/
+reports/
 
 # macOS
 .DS_Store
